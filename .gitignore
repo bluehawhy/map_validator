@@ -1,0 +1,51 @@
+# Python runtime, compiled bytecode, local caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.cache/
+
+# Local Python virtual / execution environments
+.venv/
+.venv*/
+venv/
+venv*/
+env/
+ENV/
+.conda/
+.python-version
+
+# Local environment variables and private configuration
+.env
+.env.*
+!.env.example
+!.env.sample
+.envrc
+.direnv/
+config.yaml
+config.local.yaml
+
+# Builds and generated artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Local roadview captures, AI models, analysis output, logs
+results/
+screenshots/
+captures/
+models/
+logs/
+*.log
+
+# Editor and OS artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
