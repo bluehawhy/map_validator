@@ -49,3 +49,6 @@ logs/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Locally captured button template (may reveal proprietary software)
+assets/open_roadview.png

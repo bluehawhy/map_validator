@@ -15,15 +15,33 @@ Windows 업무 프로그램에서 버튼으로 열리는 로드뷰를 분석해 
 ## 설치 (Windows 11)
 
 ```powershell
-py -3.11 -m venv .venv
+# 기본 설치된 호환 Python 버전 사용 (3.11이 없다면: py install 3.11)
+py list
+py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements-ai.txt
+python -m pip install -r requirements-ui.txt
+# AI 분석 기능을 사용할 때만 추가
+python -m pip install -r requirements-ai.txt
 Copy-Item config.example.yaml config.yaml
 ```
 
 `config.yaml`에 업무 프로그램/로드뷰 창의 제목 일부를 지정합니다. AI 모델은 첫 실행 시 다운로드되며 초기 실행에는 인터넷과 충분한 저장 공간이 필요합니다.
 
-## 실행
+## GUI 제어창 실행 (nv_c_test 스타일)
+
+Windows용 별도 **[UI/](UI/)** 폴더에 PyQt6 제어창을 추가했습니다. 참조 프로젝트의 반투명·항상 위·드래그 이동 가능한 작은 창과 상태/로그 표시 구조를 따릅니다.
+
+```powershell
+python -m UI
+```
+
+또는 탐색기에서 `UI\run_ui.bat`을 실행할 수 있습니다.
+
+UI에서 검수 ID와 Windows 창 제목, 버튼 이미지 경로, W/S 이동 방향과 횟수를 지정하고 **로드뷰 열기 / 캡처만 / 좌·우 도로 후보 분석 / 중지**를 조작합니다. 설정 저장은 Git 제외 대상인 `config.yaml`에만 기록합니다. UI는 화면 캡처 시 잠깐 숨겨 오버레이가 캡처에 섞이지 않도록 합니다. 중지는 캡처/AI 단계 사이에 확인되며, AI 모델 최초 다운로드/추론 중에는 즉시 멈추지 않을 수 있습니다.
+
+자세한 내용: [UI 조작 안내](docs/UI.md)
+
+## CLI 실행
 
 ```powershell
 # 로드뷰를 직접 연 다음 캡처만 수행
