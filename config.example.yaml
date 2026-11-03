@@ -1,0 +1,25 @@
+# Windows 창 제목에서 매칭할 일부 문자열
+windows:
+  work_title: "업무 프로그램"
+  roadview_title: "로드뷰"
+  open_button_image: "assets/open_roadview.png"
+
+capture:
+  # 창 기준 [left, top, width, height]. null이면 창 전체 캡처
+  region: null
+  settle_seconds: 1.5
+
+movement:
+  forward_key: "w"
+  backward_key: "s"
+  hold_seconds: 0.5
+  max_steps: 5
+
+analysis:
+  model_name: "nvidia/segformer-b0-finetuned-ade-512-512"
+  # 실무 적용 전 검증 필요
+  side_road_score_threshold: 0.19
+  vertical_range: [0.28, 0.60]
+
+output:
+  directory: "results"

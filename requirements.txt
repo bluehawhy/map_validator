@@ -1,0 +1,7 @@
+numpy>=1.26,<3
+opencv-python>=4.8,<5
+mss>=9,<11
+PyAutoGUI>=0.9.54,<1
+PyGetWindow>=0.0.9,<1
+PyYAML>=6,<7
+Pillow>=10,<12
