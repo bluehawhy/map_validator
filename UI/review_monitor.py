@@ -154,6 +154,8 @@ class ReviewSelectionMonitor(QThread):
                 self._condition.notify_all()
             # Never block Qt shutdown indefinitely on a stuck target UIA read.
             reader.join(timeout=0.25)
+            if reader.is_alive():
+                APP_LOG.warning("선택 조회가 아직 종료되지 않았습니다. 대상 창의 조회가 끝날 때까지 대기 중입니다.")
 
     def _run_mouse_hook(self) -> None:
         user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -232,5 +234,8 @@ class ReviewSelectionMonitor(QThread):
                     user32.DispatchMessageW(ctypes.byref(message))
                 self.msleep(20)
         finally:
-            user32.UnhookWindowsHookEx(handle)
+            if user32.UnhookWindowsHookEx(handle):
+                APP_LOG.info("검수 ID 마우스 후크 해제 완료")
+            else:
+                APP_LOG.error("검수 ID 마우스 후크 해제 실패 · 오류 코드 %s", ctypes.get_last_error())
             APP_LOG.info("검수 ID 클릭 감시 종료")
