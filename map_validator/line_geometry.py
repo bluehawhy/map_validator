@@ -160,6 +160,26 @@ def extract_line_geometry(image: np.ndarray) -> tuple[dict[str, Any], np.ndarray
         report["reason"] = "연결할 수 있는 길이의 색상 선형이 부족합니다."
         return report, overlay
     options.sort(key=lambda item: item[0])
+    # Multiple similarly close, differently oriented line chains are common
+    # in a full HD map. Do not label an arbitrary chain as the selected route.
+    best_cost = options[0][0]
+    alternate = next(
+        (
+            item for item in options[1:]
+            if (
+                item[3] is not options[0][3]
+                or item[4] is not options[0][4]
+                or item[5] is not options[0][5]
+                or not np.array_equal(item[7], options[0][7])
+            )
+        ),
+        None,
+    )
+    ambiguous = bool(
+        alternate is not None
+        and alternate[0] - best_cost < max(9., diagonal * .015)
+    )
+    report["ambiguous_path_choices"] = ambiguous
     (_, gap_in, gap_out, entry, connector, exit_line,
      entry_far, connector_start, connector_end, exit_far) = options[0]
 
@@ -189,6 +209,11 @@ def extract_line_geometry(image: np.ndarray) -> tuple[dict[str, Any], np.ndarray
         report["turn_angle_deg"] = round(angle, 1)
         if gap_in > max_gap or gap_out > max_gap:
             report["reason"] = "색상 선형 사이 간격이 커서 하나의 경로로 확인할 수 없습니다."
+        elif ambiguous:
+            report["reason"] = (
+                "연결 가능한 색상 선형이 여러 개라 어느 경로가 선택됐는지 "
+                "스크린샷만으로 확정할 수 없습니다."
+            )
         else:
             report["status"] = "candidate"
             if abs(angle) < 28:
