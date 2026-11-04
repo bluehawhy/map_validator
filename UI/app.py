@@ -102,6 +102,8 @@ class MainWindow(QMainWindow):
             return result
 
         merged = add_missing(saved, defaults)
+        if isinstance(merged.get("ui"), dict):
+            merged["ui"].pop("last_case_id", None)
         if merged != saved:
             self._backup_config()
             CONFIG.write_text(
@@ -207,16 +209,14 @@ class MainWindow(QMainWindow):
         basic_grid.addWidget(self.view_input, 1, 1)
         basic_grid.addWidget(self.view_select_btn, 1, 2)
 
-        self.case_input = QLineEdit(
-            self.cfg.get("ui", {}).get("last_case_id", "intersection_001")
-        )
-        self.case_input.setPlaceholderText("예: intersection_001")
+        self.case_input = QLineEdit()
+        self.case_input.setPlaceholderText("Polygon 또는 Link 선택 시 자동 입력")
         basic_grid.addWidget(self._label("검수 ID"), 2, 0)
         basic_grid.addWidget(self.case_input, 2, 1, 1, 2)
         basic_grid.setColumnStretch(1, 1)
         layout.addLayout(basic_grid)
 
-        for field in (self.work_input, self.view_input, self.case_input):
+        for field in (self.work_input, self.view_input):
             field.editingFinished.connect(self._save_settings)
 
         template_row = QHBoxLayout()
@@ -437,12 +437,6 @@ class MainWindow(QMainWindow):
                 return
 
             self.case_input.setText(review_id)
-            cfg = self._current_settings()
-            CONFIG.write_text(
-                yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
-                encoding="utf-8",
-            )
-            self.cfg = cfg
             self._log(f"검수 ID 자동 업데이트: {review_id}")
         except Exception:
             # Selection can be momentarily empty while the user changes tree items.
@@ -457,7 +451,6 @@ class MainWindow(QMainWindow):
         cfg["windows"]["roadview_title"] = self.view_input.text().strip()
         cfg["windows"]["open_button_image"] = self.template_input.text().strip()
         cfg["output"]["directory"] = self.output_input.text().strip() or "results"
-        cfg["ui"]["last_case_id"] = self.case_input.text().strip()
         cfg["ui"]["opacity"] = round(self.opacity_slider.value() / 100, 2)
         return cfg
 
@@ -487,8 +480,6 @@ class MainWindow(QMainWindow):
 
                 case_id = read_selected_intersection_id(review_title)
                 self.case_input.setText(case_id)
-                self._save_settings()
-                cfg = self._current_settings()
                 self._log(f"선택 교차로 검수 ID: {case_id}")
             else:
                 case_id = self.case_input.text().strip()
