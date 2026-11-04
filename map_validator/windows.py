@@ -233,7 +233,7 @@ def set_zoom_value(window, value: int) -> None:
     raise RuntimeError(f"zoom could not reach {requested}; last value was {current}")
 
 def read_selected_intersection_id(title_keyword: str) -> str:
-    """Return 'Polygon <id>- Link <id>' from the selected review-tree item."""
+    """Return the selected Polygon ID, optionally followed by its Link ID."""
     from pywinauto import Desktop
 
     configured_key = _comparable_title(title_keyword)
@@ -268,6 +268,13 @@ def read_selected_intersection_id(title_keyword: str) -> str:
             return False
 
     selected_items = [item for item in tree_items if selected(item)]
+    polygon_item = next(
+        (
+            item for item in selected_items
+            if re.search(r"\bPolygon\s*\d+\b", item.window_text(), re.IGNORECASE)
+        ),
+        None,
+    )
     link_item = next(
         (
             item for item in selected_items
@@ -275,10 +282,21 @@ def read_selected_intersection_id(title_keyword: str) -> str:
         ),
         None,
     )
+
+    if polygon_item is not None and link_item is None:
+        polygon_match = re.search(
+            r"\bPolygon\s*(\d+)\b",
+            polygon_item.window_text(),
+            re.IGNORECASE,
+        )
+        if polygon_match is None:
+            raise RuntimeError(f"Polygon ID could not be read: {polygon_item.window_text()}")
+        return f"Polygon {polygon_match.group(1)}"
+
     if link_item is None:
         selected_text = ", ".join(item.window_text() for item in selected_items)
         raise RuntimeError(
-            "Select a Link item in the intersection review tree"
+            "Select a Polygon or Link item in the intersection review tree"
             + (f": {selected_text}" if selected_text else "")
         )
 
