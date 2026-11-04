@@ -183,7 +183,7 @@ def extract_line_geometry(image: np.ndarray) -> tuple[dict[str, Any], np.ndarray
     if in_norm < 8 or out_norm < 8:
         report["reason"] = "진입 또는 진출 선형 방향을 판단할 수 없습니다."
     else:
-        cross = float(np.cross(inbound, outbound))
+        cross = float(inbound[0] * outbound[1] - inbound[1] * outbound[0])
         dot = float(np.dot(inbound, outbound))
         angle = degrees(atan2(cross, dot))
         report["turn_angle_deg"] = round(angle, 1)
@@ -215,36 +215,76 @@ def extract_line_geometry(image: np.ndarray) -> tuple[dict[str, Any], np.ndarray
     return report, overlay
 
 
-def compare_with_roadview(geometry: dict[str, Any], road_candidate: dict[str, Any]) -> dict[str, Any]:
-    """Compare candidate turn topology, never claim 3D geometric equivalence."""
+def compare_with_roadview(
+    geometry: dict[str, Any],
+    road_candidate: dict[str, Any],
+    road_shape: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Compare map-route turn topology with visual road-shape evidence.
+
+    This is a qualitative candidate comparison, NOT camera calibration,
+    coordinate matching, or a definitive road/turn-lane validation.
+    """
     expected = geometry.get("expected_turn", "unknown")
+    shape = road_shape or {}
+    curve = (
+        shape.get("curve_direction", "undetermined")
+        if shape.get("status") == "candidate"
+        else "unknown"
+    )
+    base: dict[str, Any] = {
+        "status": "insufficient_evidence",
+        "expected_turn": expected,
+        "roadview_curve_direction": curve,
+        "input_turn_angle_deg": geometry.get("turn_angle_deg"),
+        "warning": (
+            "스크린샷만으로 지도 선형을 로드뷰 3D 좌표에 정합할 수 없습니다. "
+            "원근·카메라 위치·가림과 실제 차선 분기를 반드시 직접 확인해야 합니다."
+        ),
+    }
     if geometry.get("status") != "candidate":
-        return {
-            "status": "insufficient_evidence",
-            "expected_turn": "unknown",
-            "reason": geometry.get("reason", "입력툴에서 경로를 확실하게 추출하지 못했습니다."),
-        }
+        base["reason"] = geometry.get(
+            "reason", "입력툴의 하늘색-주황색-파란색 연결 선형 추출이 불완전합니다."
+        )
+        return base
     if expected not in {"left", "right", "straight"}:
-        return {"status": "insufficient_evidence", "expected_turn": expected,
-                "reason": "선형 방향이 불명확합니다."}
+        base["reason"] = "입력툴 경로의 회전 방향이 불명확합니다."
+        return base
+
     if expected == "straight":
-        return {
-            "status": "insufficient_evidence",
-            "expected_turn": expected,
-            "reason": "한 장의 로드뷰 도로 분할만으로 직진 경로의 기하학적 일치를 검증할 수 없습니다.",
-        }
+        base["reason"] = (
+            "입력툴의 진입·연결·진출 경로는 직진 후보입니다. "
+            "로드뷰 한 장만으로 동일한 3D 직진 선형인지는 판단할 수 없습니다."
+        )
+        return base
+
     side = f"{expected}_candidate"
     score_key = f"{expected}_score"
-    found = bool(road_candidate.get(side, False))
-    return {
-        "status": "direction_consistent_candidate" if found else "possible_mismatch_review",
-        "expected_turn": expected,
-        "roadview_side_candidate": found,
-        "roadview_side_score": road_candidate.get(score_key),
-        "reason": (
-            "입력툴의 예상 회전 방향과 같은 쪽에서 로드뷰 도로 영역 후보가 검출됐습니다."
-            if found else
-            "입력툴의 예상 회전 방향에 대응하는 로드뷰 도로 영역이 확인되지 않았습니다."
-        ),
-        "warning": "화면 원근·촬영 위치·가림 때문에 실제 도로 선형 일치 여부는 사람이 확인해야 합니다.",
-    }
+    side_found = bool(road_candidate.get(side, False))
+    base["roadview_side_candidate"] = side_found
+    base["roadview_side_score"] = road_candidate.get(score_key)
+
+    if curve == expected and side_found:
+        base["status"] = "geometry_consistent_candidate"
+        base["reason"] = (
+            "입력툴의 예상 회전 방향과 로드뷰의 도로 중심 경로 휘어짐 및 "
+            "해당 측면 도로 후보가 같은 방향입니다."
+        )
+    elif curve in {"left", "right"} and curve != expected and not side_found:
+        base["status"] = "possible_mismatch_review"
+        base["reason"] = (
+            "입력툴의 예상 회전 방향과 로드뷰 중심 도로 경로가 서로 다르고 "
+            "해당 측면 도로 후보도 검출되지 않았습니다."
+        )
+    elif side_found or curve == expected:
+        base["status"] = "direction_consistent_candidate"
+        base["reason"] = (
+            "입력툴 경로의 회전 방향과 로드뷰의 일부 방향 단서가 일치하지만, "
+            "같은 도로 선형인지 확정할 수 없습니다."
+        )
+    else:
+        base["reason"] = (
+            "입력툴 경로에 대응하는 로드뷰 도로 형태가 충분히 확인되지 않았습니다. "
+            "다른 촬영 위치나 더 많은 화면이 필요할 수 있습니다."
+        )
+    return base
