@@ -1,4 +1,4 @@
-"""Persist manual stage photos and user-confirmed absent roads locally.
+"""Persist manual stage photo pairs, including photos of directions with no road.
 
 Never touches target windows; it only stores already captured frames.
 All new revisions are immutable and original PNGs are preserved.
@@ -25,8 +25,7 @@ def _now() -> str:
 
 def _default_stage() -> dict:
     return {
-        "state": "not_captured", "revision": 0,
-        "absence_confirmed_by_user": False, "history": [],
+        "state": "not_captured", "revision": 0, "history": [],
     }
 
 
@@ -63,8 +62,6 @@ def stored_image(folder: Path, relative: str | None) -> Path | None:
 
 def stage_status(folder: Path, record: dict) -> str:
     """Do not classify missing data as a road that does not exist."""
-    if record.get("absence_confirmed_by_user"):
-        return "road_absent_user_marked"
     has_work = stored_image(folder, record.get("work_image")) is not None
     has_road = stored_image(folder, record.get("roadview_image")) is not None
     if has_work and has_road:
@@ -146,7 +143,6 @@ def capture_stage(
             "work_image": work_path.relative_to(folder).as_posix(),
             "roadview_image": view_path.relative_to(folder).as_posix(),
             "captured_at": _now(),
-            "absence_confirmed_by_user": False,
             "history": history,
         }
         _write_json(folder / MANIFEST_NAME, manifest)
@@ -163,19 +159,3 @@ def capture_stage(
         "revision": revision, "state": "captured",
         "work_image": str(work_path), "roadview_image": str(view_path),
     }
-
-
-def set_road_absent(folder: Path, case_id: str, stage: str, absent: bool) -> dict:
-    """Record explicit user judgement; never infer road absence from no photo."""
-    stage = validate_stage(stage)
-    if stage == "before":
-        raise ValueError("진입 전 단계는 '도로 없음'으로 표시할 수 없습니다.")
-    manifest = read_manifest(folder, validate_case_id(case_id))
-    record = manifest["stages"][stage]
-    record["absence_confirmed_by_user"] = bool(absent)
-    record["state"] = (
-        "road_absent_user_marked" if absent else stage_status(folder, record)
-    )
-    record["updated_at"] = _now()
-    _write_json(folder / MANIFEST_NAME, manifest)
-    return record
