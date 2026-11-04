@@ -163,7 +163,7 @@ class MainWindow(QMainWindow):
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedSize(470, 760)
+        self.setFixedSize(470, 730)
         opacity = float(self.cfg.get("ui", {}).get("opacity", 0.92))
         self.setWindowOpacity(max(0.35, min(opacity, 1.0)))
         outer = QWidget()
@@ -309,11 +309,6 @@ class MainWindow(QMainWindow):
         actions.setVerticalSpacing(6)
         self.open_btn = QPushButton("로드뷰 열기")
         self.capture_btn = QPushButton("캡처만")
-        self.debug_work_btn = QPushButton("입력툴만 찍기 (디버그)")
-        self.debug_work_btn.setToolTip(
-            "HD_3D Tool을 활성화하거나 크기를 변경하지 않고 "
-            "WGC로만 촬영합니다. 로드뷰·Zoom·스크롤·검수 ID는 필요 없습니다."
-        )
         self.start_btn = QPushButton("좌·우 도로 후보 분석")
         self.start_btn.setObjectName("primary")
         self.stop_btn = QPushButton("중지")
@@ -321,14 +316,12 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(False)
         self.open_btn.clicked.connect(lambda: self._start("open"))
         self.capture_btn.clicked.connect(lambda: self._start("capture"))
-        self.debug_work_btn.clicked.connect(lambda: self._start("capture_work"))
         self.start_btn.clicked.connect(lambda: self._start("analyze"))
         self.stop_btn.clicked.connect(self._stop)
         actions.addWidget(self.open_btn, 0, 0)
         actions.addWidget(self.capture_btn, 0, 1)
         actions.addWidget(self.start_btn, 1, 0)
         actions.addWidget(self.stop_btn, 1, 1)
-        actions.addWidget(self.debug_work_btn, 2, 0, 1, 2)
         actions.setColumnStretch(0, 1)
         actions.setColumnStretch(1, 1)
         layout.addLayout(actions)
@@ -530,10 +523,7 @@ class MainWindow(QMainWindow):
             return
         try:
             cfg = self._current_settings()
-            if action == "capture_work":
-                # The debug button must work even without a selected Polygon.
-                case_id = self.case_input.text().strip()
-            elif action == "analyze":
+            if action == "analyze":
                 if not cfg["windows"].get("intersection_review_title", "").strip():
                     raise ValueError("config.yaml에 입력 교차로 타이틀을 설정하세요.")
                 # Resolve the selected ID on ControlWorker's QThread, never here.
@@ -578,9 +568,8 @@ class MainWindow(QMainWindow):
             self._busy(True)
             if action == "analyze":
                 self.case_input.clear()
-            if action != "capture_work":
-                self.left_result.setText("좌측: 분석 전")
-                self.right_result.setText("우측: 분석 전")
+            self.left_result.setText("좌측: 분석 전")
+            self.right_result.setText("우측: 분석 전")
             self.status_label.setText("진행 중")
             self._log(f"시작: {action} / {case_id or '교차로 선택값 조회 중'}")
             self.worker.start()
@@ -589,8 +578,7 @@ class MainWindow(QMainWindow):
 
     def _busy(self, busy: bool) -> None:
         for widget in (
-            self.open_btn, self.capture_btn, self.debug_work_btn,
-            self.start_btn, self.save_btn,
+            self.open_btn, self.capture_btn, self.start_btn, self.save_btn,
             self.case_input, self.work_input, self.view_input, self.template_input,
             self.work_select_btn, self.view_select_btn, self.window_info_btn, self.output_input,
             self.move_combo, self.step_spin, self.open_first,
@@ -623,12 +611,6 @@ class MainWindow(QMainWindow):
         }.get(code, "확인 필요")
 
     def _show_result(self, result: dict) -> None:
-        if "debug_work_image" in result:
-            self.latest_folder = result["folder"]
-            self.folder_btn.setEnabled(True)
-            self._log(f"입력툴 WGC 디버그 캡처 완료: {result['debug_work_image']}")
-            self._log("실제 HD_3D Tool 화면이 흰색으로 변했는지도 확인해 주세요.")
-            return
         if "folder" not in result:
             self._log(result.get("message", "완료"))
             return
