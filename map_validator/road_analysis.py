@@ -45,15 +45,20 @@ class RoadSegmenter:
         self.processor = AutoImageProcessor.from_pretrained(model_name)
         self.model = SegformerForSemanticSegmentation.from_pretrained(model_name)
         self.model.eval()
-        self.road_class_ids = [
-            int(idx)
-            for idx, label in self.model.config.id2label.items()
-            if str(label).strip().casefold() == "road"
-        ]
+        self.class_ids = {
+            name: [
+                int(idx)
+                for idx, label in self.model.config.id2label.items()
+                if str(label).strip().casefold() == name
+            ]
+            for name in ("road", "building")
+        }
+        self.road_class_ids = self.class_ids["road"]
         if not self.road_class_ids:
             raise RuntimeError("Model has no exact 'road' class; review class mapping")
 
-    def mask(self, bgr: np.ndarray) -> np.ndarray:
+    def class_masks(self, bgr: np.ndarray) -> dict[str, np.ndarray]:
+        """Classify road/building together with one inference, never guess missing labels."""
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         inputs = self.processor(images=Image.fromarray(rgb), return_tensors="pt")
         with self.torch.inference_mode():
@@ -62,7 +67,16 @@ class RoadSegmenter:
         label_map = self.processor.post_process_semantic_segmentation(
             outputs, target_sizes=[(h, w)]
         )[0].cpu().numpy()
-        return np.isin(label_map, self.road_class_ids).astype(np.uint8)
+        return {
+            name: (
+                np.isin(label_map, ids).astype(np.uint8)
+                if ids else np.zeros((h, w), dtype=np.uint8)
+            )
+            for name, ids in self.class_ids.items()
+        }
+
+    def mask(self, bgr: np.ndarray) -> np.ndarray:
+        return self.class_masks(bgr)["road"]
 
 
 def analyze_road_mask(mask: np.ndarray, threshold: float = 0.19,
