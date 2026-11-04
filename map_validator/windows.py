@@ -232,3 +232,84 @@ def set_zoom_value(window, value: int) -> None:
 
     raise RuntimeError(f"zoom could not reach {requested}; last value was {current}")
 
+def read_selected_intersection_id(title_keyword: str) -> str:
+    """Return '<polygon id>-<link id>' from the selected review-tree item."""
+    from pywinauto import Desktop
+
+    configured_key = _comparable_title(title_keyword)
+    windows = [
+        window for window in Desktop(backend="uia").windows()
+        if configured_key
+        and configured_key in _comparable_title(window.window_text())
+    ]
+    if not windows:
+        raise RuntimeError(f"Intersection review window not found: {title_keyword!r}")
+
+    controls = windows[0].descendants()
+    tree_items = [
+        control for control in controls
+        if control.element_info.control_type == "TreeItem"
+    ]
+    if not tree_items:
+        raise RuntimeError("Intersection review tree was not exposed through Windows UI Automation")
+
+    def selected(control) -> bool:
+        try:
+            return bool(control.is_selected())
+        except Exception:
+            pass
+        try:
+            return bool(control.iface_selection_item.CurrentIsSelected)
+        except Exception:
+            pass
+        try:
+            return bool(control.has_keyboard_focus())
+        except Exception:
+            return False
+
+    selected_items = [item for item in tree_items if selected(item)]
+    link_item = next(
+        (
+            item for item in selected_items
+            if re.search(r"\bLink\s*\d+\b", item.window_text(), re.IGNORECASE)
+        ),
+        None,
+    )
+    if link_item is None:
+        selected_text = ", ".join(item.window_text() for item in selected_items)
+        raise RuntimeError(
+            "Select a Link item in the intersection review tree"
+            + (f": {selected_text}" if selected_text else "")
+        )
+
+    link_match = re.search(r"\bLink\s*(\d+)\b", link_item.window_text(), re.IGNORECASE)
+    if link_match is None:
+        raise RuntimeError(f"Link ID could not be read: {link_item.window_text()}")
+    link_id = link_match.group(1)
+
+    polygon_id = None
+    try:
+        parent = link_item.parent()
+        for _ in range(4):
+            text = parent.window_text()
+            match = re.search(r"\bPolygon\s*(\d+)\b", text, re.IGNORECASE)
+            if match:
+                polygon_id = match.group(1)
+                break
+            parent = parent.parent()
+    except Exception:
+        pass
+
+    if polygon_id is None:
+        selected_index = tree_items.index(link_item)
+        for item in reversed(tree_items[:selected_index]):
+            match = re.search(r"\bPolygon\s*(\d+)\b", item.window_text(), re.IGNORECASE)
+            if match:
+                polygon_id = match.group(1)
+                break
+
+    if polygon_id is None:
+        raise RuntimeError("Parent Polygon ID could not be read for the selected Link")
+
+    return f"{polygon_id}-{link_id}"
+
