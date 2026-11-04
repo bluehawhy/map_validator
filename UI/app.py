@@ -98,6 +98,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.worker = None
+        self._scroll_to_results = False
         self.review_monitor = None
         self._close_pending = False
         self.latest_folder: str | None = None
@@ -215,6 +216,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(header)
 
         self.status_label = self._label("준비됨 | 현장 최종 검수 필요", "status")
+        self.status_label.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         layout.addWidget(self.status_label)
 
         target_header = QHBoxLayout()
@@ -288,6 +290,7 @@ class MainWindow(QMainWindow):
         # Keep stage controls accessible on smaller displays. Only the
         # map_validator panel may resize; neither target application is touched.
         steps_scroller = QScrollArea()
+        self.steps_scroller = steps_scroller
         steps_scroller.setFrameShape(QFrame.Shape.NoFrame)
         steps_scroller.setWidgetResizable(True)
         steps_scroller.setObjectName("stageScroller")
@@ -359,7 +362,8 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.stop_btn, 1)
         sections.addLayout(actions)
 
-        sections.addWidget(self._label("2. 항목별 비교 결과 (검수 보조)", "section"))
+        self.result_heading = self._label("2. 항목별 비교 결과 (검수 보조)", "section")
+        sections.addWidget(self.result_heading)
         self.geometry_result = self._label("분석 전 · 최종 사람 검수 필요", "decision")
         sections.addWidget(self.geometry_result)
         self.analysis_details = QTextEdit()
@@ -677,7 +681,13 @@ class MainWindow(QMainWindow):
             self.worker.result_ready.connect(self._show_result)
             self.worker.show_panel.connect(self._restore_panel)
             self.worker.finished.connect(self._done)
+            self._scroll_to_results = False
+            scroll_position = self.steps_scroller.verticalScrollBar().value()
+            # Move focus outside the scroll area before disabling its buttons.
+            self.status_label.setFocus(Qt.FocusReason.OtherFocusReason)
             self._busy(True)
+            if action.startswith("capture_"):
+                self.steps_scroller.verticalScrollBar().setValue(scroll_position)
             self.status_label.setText("진행 중")
             self._log(f"시작: {action} / {case_id or '교차로 선택값 조회 중'}")
             self.worker.start()
@@ -782,9 +792,13 @@ class MainWindow(QMainWindow):
                     }.get(comparison.get("status"), "N")
                     geometry_items.append(f"{label} {verdict}")
                 lines.append("입력툴: " + "  |  ".join(input_items))
+                lines.append("")
                 lines.append("도로 선형: " + "  |  ".join(geometry_items))
+                lines.append("")
                 lines.append("※ P: 일치 후보 / F: 불일치 의심 / N: 판단 보류 · 최종 확인 필요")
+                lines.append("")
                 lines.append("※ 입력툴 점수는 색상 경로 후보의 고정 휴리스틱 점수이며 확률이 아닙니다.")
+                lines.append("")
                 lines.extend([
                     "[도로 영역 스코어 · 0~1, 높을수록 ROI 내 도로 픽셀 많음]",
                     "진입 전 : 좌 {0}  |  직 {1}  |  우 {2}".format(
@@ -826,6 +840,8 @@ class MainWindow(QMainWindow):
                     if comparison.get("status") == "mismatch_review":
                         lines.append("    " + comparison.get("reason", ""))
             self.analysis_details.setPlainText("\n".join(lines))
+            self.analysis_details.verticalScrollBar().setValue(0)
+            self._scroll_to_results = True
             self.status_label.setText("단계별 분석 완료 · 최종 검수 필요")
             self._log(
                 f"4단계 사진 {summary['captured_stages']}/4 분석 완료 · "
@@ -846,10 +862,23 @@ class MainWindow(QMainWindow):
 
     def _done(self) -> None:
         self._restore_panel()
+        scroll_position = self.steps_scroller.verticalScrollBar().value()
+        show_results = self._scroll_to_results
+        self._scroll_to_results = False
         self._busy(False)
         if self.worker is not None:
             self.worker.deleteLater()
             self.worker = None
+        if show_results:
+            QTimer.singleShot(0, self._show_comparison_section)
+        else:
+            self.steps_scroller.verticalScrollBar().setValue(scroll_position)
+
+    def _show_comparison_section(self) -> None:
+        # Layout changes are applied before locating the result section.
+        content = self.steps_scroller.widget()
+        position = self.result_heading.mapTo(content, self.result_heading.rect().topLeft())
+        self.steps_scroller.verticalScrollBar().setValue(position.y())
 
     def _open_folder(self) -> None:
         if self.latest_folder and Path(self.latest_folder).is_dir():
