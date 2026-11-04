@@ -27,8 +27,8 @@ def arguments() -> argparse.Namespace:
 
 def main() -> int:
     args = arguments()
-    if not args.case_id or not all(ch.isalnum() or ch in "-_" for ch in args.case_id):
-        raise ValueError("--case-id supports only letters, numbers, - and _")
+    if not args.case_id or not all(ch.isalnum() or ch in "-_ " for ch in args.case_id):
+        raise ValueError("--case-id supports only letters, numbers, spaces, - and _")
     if args.steps < 0:
         raise ValueError("--steps must be >= 0")
     config_path = Path(args.config).resolve()
