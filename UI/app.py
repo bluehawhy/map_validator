@@ -425,6 +425,11 @@ class MainWindow(QMainWindow):
             field.setText(configured)
             self._save_settings()
             if target.isMinimized:
+                if label == "입력 프로그램":
+                    raise RuntimeError(
+                        "입력도구는 창 위치·크기 보호를 위해 자동 복원하지 않습니다. "
+                        "사용자가 직접 복원해 주세요."
+                    )
                 target.restore()
             target.activate()
         except Exception as exc:
@@ -523,6 +528,16 @@ class MainWindow(QMainWindow):
                     raise ValueError("config.yaml에 입력 교차로 타이틀을 설정하세요.")
                 # Resolve the selected ID on ControlWorker's QThread, never here.
                 case_id = ""
+            elif action == "capture":
+                case_id = self.case_input.text().strip()
+                if not case_id and not cfg["windows"].get(
+                    "intersection_review_title", ""
+                ).strip():
+                    raise ValueError(
+                        "검수 ID가 없습니다. 교차로 선형 검수 창을 선택하거나 "
+                        "config.yaml에 입력 교차로 타이틀을 설정하세요."
+                    )
+                # An empty ID is re-read in the background before capture.
             else:
                 case_id = self.case_input.text().strip()
                 if not case_id:
