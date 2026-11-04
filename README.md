@@ -31,10 +31,9 @@ py -m venv .venv
 python -m pip install -r requirements-ui.txt
 # AI 분석 기능을 사용할 때만 추가
 python -m pip install -r requirements-ai.txt
-Copy-Item config.example.yaml config.yaml
 ```
 
-Python 3.11이 꼭 필요한 것은 아닙니다. 설치된 호환 버전으로 가상환경을 만들 수 있습니다. 업무 프로그램/로드뷰 창 제목과 버튼 템플릿은 로컬 `config.yaml`에 설정합니다.
+Python 3.11이 꼭 필요한 것은 아닙니다. 설치된 호환 버전으로 가상환경을 만들 수 있습니다. `config.yaml`이 없으면 UI가 예제 기본값으로 시작하며, UI에서 설정 저장 시 새 파일을 만듭니다. 기존 `config.yaml`은 예제 파일로 덮어쓰지 마세요. 새 기본 항목은 기존 값을 건드리지 않고 자동 보충됩니다.
 
 ## 제어 UI
 
