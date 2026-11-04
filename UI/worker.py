@@ -16,6 +16,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from map_validator.app_logging import log_exception_at_source
 from map_validator.com_threading import sta_com_apartment
 from map_validator.capture_naming import capture_file_name
+from map_validator.work_capture import capture_work_window
 
 import logging
 
@@ -57,7 +58,7 @@ class ControlWorker(QThread):
         self.config = config
         self.config_dir = config_dir
         self.case_id = case_id
-        self.action = action  # open | capture | analyze
+        self.action = action  # open | capture | analyze | capture_work
         self.movement = movement
         self.steps = steps
         self.open_first = open_first
@@ -116,6 +117,45 @@ class ControlWorker(QThread):
 
     def _run_job(self) -> None:
         try:
+            if self.action == "capture_work":
+                # Diagnostics are independent of roadview and intersection ID.
+                # Never activate the target, manipulate zoom, scroll, or use
+                # PrintWindow, even as a fallback.
+                self._check_stop()
+                self._progress("디버그: HD_3D Tool WGC 비활성 캡처 중")
+                work = find_window(self.config["windows"]["work_title"])
+                work_frame = capture_work_window(work)
+                self._check_stop()
+                folder = (
+                    self._path(
+                        self.config.get("output", {}).get("directory", "results")
+                    ) / "_debug"
+                )
+                folder.mkdir(parents=True, exist_ok=True)
+                name_case = (
+                    self.case_id
+                    if re.fullmatch(r"[A-Za-z0-9 _-]+", self.case_id)
+                    else "debug"
+                )
+                filename = capture_file_name(
+                    name_case, self.config["windows"]["work_title"], 0, 1
+                )
+                image_path = folder / (
+                    filename[:-4]
+                    + "_"
+                    + datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+                    + ".png"
+                )
+                if not cv2.imwrite(str(image_path), work_frame):
+                    raise RuntimeError(f"입력툴 디버그 이미지 저장 실패: {image_path}")
+                APP_LOG.info("입력툴 WGC 디버그 이미지 저장: %s", image_path)
+                self.result_ready.emit({
+                    "debug_work_image": str(image_path),
+                    "folder": str(folder),
+                })
+                self._progress("입력툴 디버그 캡처 완료")
+                return
+
             if self.action == "analyze" or (
                 self.action == "capture" and not self.case_id.strip()
             ):
@@ -219,8 +259,9 @@ class ControlWorker(QThread):
                 if not cv2.imwrite(str(roadview_path), frame):
                     raise RuntimeError(f"로드뷰 스크린샷 저장 실패: {roadview_path}")
 
-                # A separate PrintWindow capture: no foreground activation.
-                work_frame = capture_window(work)
+                # Never call PrintWindow on HD_3D Tool: capture its DWM
+                # window surface with Windows Graphics Capture instead.
+                work_frame = capture_work_window(work)
                 work_name = capture_file_name(
                     self.case_id, self.config["windows"]["work_title"],
                     idx, count + 1,
