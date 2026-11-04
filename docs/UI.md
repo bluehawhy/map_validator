@@ -14,7 +14,6 @@ py -m venv .venv
 python -m pip install -r requirements-ui.txt
 # AI 분석 시에만 추가 설치
 python -m pip install -r requirements-ai.txt
-Copy-Item config.example.yaml config.yaml
 python -m UI
 ```
 
