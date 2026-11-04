@@ -91,12 +91,23 @@ class ReviewSelectionMonitor(QThread):
                             self._condition.wait(timeout=remaining)
                         if self._stop.is_set():
                             return
+                        click_at = self._last_click_at
                         self._pending = False
 
                     if self._paused.is_set():
                         continue
+                    read_started = time.monotonic()
+                    APP_LOG.info(
+                        "선택 조회 시작 · 클릭 후 %.0fms",
+                        (read_started - click_at) * 1000,
+                    )
+                    outcome = "실패"
                     try:
-                        selected = read_selected_intersection_id(self.review_title)
+                        selected = read_selected_intersection_id(
+                            self.review_title,
+                            diagnostic=lambda message: APP_LOG.info("선택 조회 · %s", message),
+                        )
+                        outcome = "변경" if selected and selected != last_selection else "변경 없음"
                         if (
                             selected
                             and selected != last_selection
@@ -105,11 +116,15 @@ class ReviewSelectionMonitor(QThread):
                         ):
                             last_selection = selected
                             self.selection_changed.emit(selected)
-                    except Exception:
-                        # A click can land outside the tree, or the dialog may
-                        # close. Keep the previously displayed ID unchanged.
-                        APP_LOG.debug(
-                            "클릭 후 교차로 선택값 조회 실패", exc_info=True
+                    except Exception as exc:
+                        # The selection or window may disappear during a read.
+                        APP_LOG.warning("선택 조회 실패 · %s: %s", type(exc).__name__, exc)
+                    finally:
+                        finished = time.monotonic()
+                        APP_LOG.info(
+                            "선택 조회 종료 · 결과 %s · 조회 %.0fms · 클릭 후 %.0fms",
+                            outcome, (finished - read_started) * 1000,
+                            (finished - click_at) * 1000,
                         )
         except Exception as exc:
             log_exception_at_source(APP_LOG, "클릭 기반 검수 ID 조회 오류", exc)
