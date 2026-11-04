@@ -21,6 +21,7 @@ map_validator/
 │   ├── staged_capture.py        # 단계별 사진 쌍·재촬영 버전·manifest
 │   ├── input_features.py        # HD_3D Tool의 기대값 후보
 │   ├── roadview_features.py     # 도로/건물 및 노면표시 후보
+│   ├── road_scores.py           # 진입 전·후 여섯 방향 도로 점수와 JSON/CSV
 │   ├── staged_compare.py        # 4단계 비교·근거 이미지·JSON
 │   └── wgc_capture.py           # 두 창 공용 비활성 캡처
 ├── docs/                        # 프로젝트/개발 문서
@@ -69,9 +70,10 @@ map_validator/
 | 입력툴 기대값(정지선·색상 선형) | `map_validator/input_features.py` |
 | 로드뷰 실제 관측(도로·건물 등) | `map_validator/roadview_features.py` |
 | 4단계 검수 비교/보고서 | `map_validator/staged_compare.py` |
+| 진입 전 좌/직/우 + 진입 후 좌/직/우 정면 점수 계산·저장 | `map_validator/road_scores.py` |
 | 두 프로그램 비활성 캡처 | `map_validator/wgc_capture.py` |
 | CLI 인자와 전체 작업 실행 | `map_validator/cli.py` |
 | PyQt6 사용자 인터페이스 | `UI/` |
 | 보고서 형식·판정 상태 설명 | `docs/REQUIREMENTS.md` 및 엔진 보고서 코드 |
 
-새로 구현한 4단계 수동 촬영·선형/도로/건물 후보 비교는 단계 정의, 이미지 추출, 검수 비교 모듈로 분리했다. 차로 수·복합 화살표·유도선 개수 등의 정확한 자동 인식은 현장 표본과 명확한 입력툴 표시 기준을 바탕으로 보완한다. 향후 정확한 3D 도로 좌표 비교가 필요하면 지도 기준점·카메라 자세·위치 보정 기능을 별도 모듈로 설계한다. 실제 데이터와 결과는 `results/`, `config.yaml`, 로컬 캐시에 두고 버전 관리하지 않는다.
+새로 구현한 4단계 수동 촬영·선형/도로/건물 후보 비교는 단계 정의, 이미지 추출, 검수 비교 모듈로 분리했다. 점수 데이터는 검수 ID별 `road_scores.json`·`score_history/`에 보존하고 모든 교차로의 최신값은 `output.directory/road_scores.csv` 한 파일에서 집계한다. 해당 CSV와 원본 스코어 이력은 로컬 업무 자료이므로 Git에서 제외한다. 차로 수·복합 화살표·유도선 개수 등의 정확한 자동 인식은 현장 표본과 명확한 입력툴 표시 기준을 바탕으로 보완한다. 향후 정확한 3D 도로 좌표 비교가 필요하면 지도 기준점·카메라 자세·위치 보정 기능을 별도 모듈로 설계한다. 실제 데이터와 결과는 `results/`, `config.yaml`, 로컬 캐시에 두고 버전 관리하지 않는다.
