@@ -332,9 +332,8 @@ class MainWindow(QMainWindow):
             "로드뷰 단독 흰색 정지선의 최소 검출 신뢰도. "
             "높일수록 엄격하게 판정하며 횡단보도는 정지선에서 제외합니다."
         )
-        self.stop_line_threshold.valueChanged.connect(
-            lambda _value: self._save_settings()
-        )
+        # Save after editing, not on every spinbox increment/keystroke.
+        self.stop_line_threshold.editingFinished.connect(self._save_settings)
         threshold_row.addWidget(self.stop_line_threshold)
         threshold_row.addStretch(1)
         sections.addLayout(threshold_row)
