@@ -80,3 +80,56 @@ def click_template_in_window(window, template_path: str, threshold: float = 0.88
         return False
     pyautogui.click(int(window.left) + px + tw // 2, int(window.top) + py + th // 2)
     return True
+
+
+def scroll_to_bottom(window) -> None:
+    """Move a browser-like roadview viewport to its bottom without mouse-wheel zoom."""
+    activate(window)
+    pyautogui.hotkey("ctrl", "end")
+    time.sleep(0.4)
+
+
+def set_zoom_value(window, value: int) -> None:
+    """Set the numeric edit nearest a UI Automation element containing 'zoom'."""
+    from pywinauto import Desktop
+
+    if not 1 <= int(value) <= 500:
+        raise ValueError("zoom value must be between 1 and 500")
+
+    title = window.title.strip()
+    candidates = Desktop(backend="uia").windows(title=title)
+    if not candidates:
+        raise RuntimeError(f"UI Automation window not found: {title}")
+
+    target = candidates[0]
+    controls = target.descendants()
+    zoom_labels = [
+        control for control in controls
+        if "zoom" in control.window_text().casefold()
+    ]
+    edits = [
+        control for control in controls
+        if control.element_info.control_type in {"Edit", "Spinner"}
+    ]
+    if not zoom_labels:
+        raise RuntimeError("zoom label was not exposed through Windows UI Automation")
+    if not edits:
+        raise RuntimeError("zoom numeric input was not exposed through Windows UI Automation")
+
+    label_rect = zoom_labels[0].rectangle()
+
+    def distance(control) -> tuple[int, int]:
+        rect = control.rectangle()
+        vertical = abs((rect.top + rect.bottom) - (label_rect.top + label_rect.bottom))
+        right_side_penalty = 0 if rect.left >= label_rect.left else 10000
+        return vertical + right_side_penalty, abs(rect.left - label_rect.right)
+
+    zoom_input = min(edits, key=distance)
+    try:
+        zoom_input.set_edit_text(str(int(value)))
+    except Exception:
+        zoom_input.click_input()
+        zoom_input.type_keys("^a" + str(int(value)) + "{ENTER}", set_foreground=False)
+    else:
+        zoom_input.type_keys("{ENTER}", set_foreground=False)
+    time.sleep(0.3)
