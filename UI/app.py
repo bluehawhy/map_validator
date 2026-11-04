@@ -42,10 +42,12 @@ class DragHeader(QWidget):
         super().__init__(parent)
         self._last_pos = None
         self.setObjectName("header")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._last_pos = event.globalPosition().toPoint()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
@@ -58,6 +60,7 @@ class DragHeader(QWidget):
 
     def mouseReleaseEvent(self, event) -> None:
         self._last_pos = None
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         super().mouseReleaseEvent(event)
 
 
@@ -136,11 +139,21 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(18, 14, 18, 15)
         layout.setSpacing(8)
 
-        header = DragHeader()
+        header = QWidget()
+        header.setObjectName("header")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.addWidget(self._label("🛣  map_validator", "title"))
-        header_layout.addStretch(1)
+
+        drag_area = DragHeader()
+        drag_area.setToolTip("이 영역을 드래그해 창을 이동합니다.")
+        drag_layout = QHBoxLayout(drag_area)
+        drag_layout.setContentsMargins(0, 0, 8, 0)
+        title_label = self._label("🛣  map_validator", "title")
+        title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        drag_layout.addWidget(title_label)
+        drag_layout.addStretch(1)
+        header_layout.addWidget(drag_area, 1)
+
         header_layout.addWidget(self._label("투명도", "hint"))
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(35, 100)
