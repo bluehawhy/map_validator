@@ -1,13 +1,19 @@
-"""Read intersection selections away from the Qt GUI event loop.
+"""Update the review ID only after left clicks in the review window.
 
-This monitor is deliberately read-only. It polls the configured review
-window even when Chrome or map_validator has focus. Work sessions pause
-the monitor to avoid competing UIA reads. It never moves or resizes a window.
+A native low-level mouse hook detects the user's click without repeatedly
+querying Windows UI Automation. The hook callback only queues a notification;
+a separate reader thread checks the Polygon/Link selection 200 ms later so
+neither the Qt event loop nor the global mouse hook blocks on UIA.
 """
 from __future__ import annotations
 
+import ctypes
 import logging
+import re
+import sys
 import threading
+import time
+from ctypes import wintypes
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -16,50 +22,200 @@ from map_validator.com_threading import sta_com_apartment
 
 APP_LOG = logging.getLogger("map_validator.ui.review_monitor")
 
+WH_MOUSE_LL = 14
+WM_LBUTTONUP = 0x0202
+WM_QUIT = 0x0012
+PM_REMOVE = 0x0001
+SELECTION_SETTLE_SECONDS = 0.20
+
+
+def _comparable_title(value: str) -> str:
+    return re.sub(r"[^0-9a-z가-힣]+", "", value.casefold())
+
 
 class ReviewSelectionMonitor(QThread):
+    """Listen to click events without moving, activating, or resizing windows."""
+
     selection_changed = pyqtSignal(str)
 
     def __init__(self, review_title: str, parent=None) -> None:
         super().__init__(parent)
         self.review_title = review_title.strip()
+        self._title_key = _comparable_title(self.review_title)
         self._paused = threading.Event()
+        self._stop = threading.Event()
+        self._condition = threading.Condition()
+        self._pending = False
+        self._last_click_at = 0.0
 
     def set_paused(self, paused: bool) -> None:
-        if paused:
-            self._paused.set()
-        else:
-            self._paused.clear()
+        with self._condition:
+            if paused:
+                self._paused.set()
+                self._pending = False
+            else:
+                self._paused.clear()
+            self._condition.notify_all()
+
+    def _schedule_read(self) -> None:
+        # Called by the low-level mouse hook. Never perform any UIA work here.
+        if self._paused.is_set() or self._stop.is_set():
+            return
+        with self._condition:
+            self._last_click_at = time.monotonic()
+            self._pending = True
+            self._condition.notify()
+
+    def _read_after_click(self) -> None:
+        try:
+            from map_validator.windows import read_selected_intersection_id
+
+            with sta_com_apartment():
+                last_selection = None
+                while not self._stop.is_set():
+                    with self._condition:
+                        while not self._pending and not self._stop.is_set():
+                            self._condition.wait(timeout=0.25)
+                        if self._stop.is_set():
+                            return
+
+                        # Coalesce quick/double clicks. Inspect only after the
+                        # selection has had time to settle.
+                        while not self._stop.is_set():
+                            remaining = (
+                                self._last_click_at + SELECTION_SETTLE_SECONDS
+                                - time.monotonic()
+                            )
+                            if remaining <= 0:
+                                break
+                            self._condition.wait(timeout=remaining)
+                        if self._stop.is_set():
+                            return
+                        self._pending = False
+
+                    if self._paused.is_set():
+                        continue
+                    try:
+                        selected = read_selected_intersection_id(self.review_title)
+                        if (
+                            selected
+                            and selected != last_selection
+                            and not self._paused.is_set()
+                            and not self._stop.is_set()
+                        ):
+                            last_selection = selected
+                            self.selection_changed.emit(selected)
+                    except Exception:
+                        # A click can land outside the tree, or the dialog may
+                        # close. Keep the previously displayed ID unchanged.
+                        APP_LOG.debug(
+                            "클릭 후 교차로 선택값 조회 실패", exc_info=True
+                        )
+        except Exception as exc:
+            log_exception_at_source(APP_LOG, "클릭 기반 검수 ID 조회 오류", exc)
 
     def run(self) -> None:
+        if not self._title_key:
+            return
+        if sys.platform != "win32":
+            APP_LOG.error("마우스 클릭 감시는 Windows에서만 지원합니다.")
+            return
+
+        self._stop.clear()
+        reader = threading.Thread(
+            target=self._read_after_click,
+            name="ReviewSelectionReader",
+            daemon=True,
+        )
+        reader.start()
         try:
-            with sta_com_apartment():
-                self._poll_selection()
+            self._run_mouse_hook()
         except Exception as exc:
-            log_exception_at_source(APP_LOG, "교차로 선택 감시 스레드 오류", exc)
+            log_exception_at_source(APP_LOG, "마우스 클릭 감시 시작 실패", exc)
+        finally:
+            self._stop.set()
+            with self._condition:
+                self._pending = False
+                self._condition.notify_all()
+            # Never block Qt shutdown indefinitely on a stuck target UIA read.
+            reader.join(timeout=0.25)
 
-    def _poll_selection(self) -> None:
-        # Both imports and Windows automation run on this dedicated thread.
-        from map_validator.windows import read_selected_intersection_id
+    def _run_mouse_hook(self) -> None:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        hook_type = ctypes.WINFUNCTYPE(
+            ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+        )
 
-        last_selection = None
-        while not self.isInterruptionRequested():
-            if self.review_title and not self._paused.is_set():
+        user32.SetWindowsHookExW.argtypes = [
+            ctypes.c_int, hook_type, ctypes.c_void_p, wintypes.DWORD,
+        ]
+        user32.SetWindowsHookExW.restype = ctypes.c_void_p
+        user32.CallNextHookEx.argtypes = [
+            ctypes.c_void_p, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM,
+        ]
+        user32.CallNextHookEx.restype = ctypes.c_ssize_t
+        user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+        user32.UnhookWindowsHookEx.restype = wintypes.BOOL
+        user32.GetForegroundWindow.argtypes = []
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetWindowTextW.argtypes = [
+            wintypes.HWND, ctypes.c_wchar_p, ctypes.c_int,
+        ]
+        user32.GetWindowTextW.restype = ctypes.c_int
+        user32.PeekMessageW.argtypes = [
+            ctypes.POINTER(wintypes.MSG), wintypes.HWND,
+            wintypes.UINT, wintypes.UINT, wintypes.UINT,
+        ]
+        user32.PeekMessageW.restype = wintypes.BOOL
+        user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+        user32.TranslateMessage.restype = wintypes.BOOL
+        user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+        user32.DispatchMessageW.restype = ctypes.c_ssize_t
+        kernel32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+        kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+
+        def on_mouse(code: int, message: int, data: int) -> int:
+            if code >= 0 and message == WM_LBUTTONUP and not self._paused.is_set():
                 try:
-                    # UIA and Win32 tree selection can be queried without
-                    # foreground focus; never activate, move, or resize the
-                    # HD_3D Tool or its review dialog.
-                    selected_id = read_selected_intersection_id(self.review_title)
-                    if not self._paused.is_set() and selected_id != last_selection:
-                        last_selection = selected_id
-                        self.selection_changed.emit(selected_id)
+                    handle = user32.GetForegroundWindow()
+                    if handle:
+                        title_buffer = ctypes.create_unicode_buffer(256)
+                        if user32.GetWindowTextW(
+                            handle, title_buffer, len(title_buffer)
+                        ):
+                            if self._title_key in _comparable_title(
+                                title_buffer.value
+                            ):
+                                self._schedule_read()
                 except Exception:
-                    # Selection can be empty or the dialog can close briefly.
-                    # Keep last_selection and retry without touching focus.
-                    APP_LOG.debug("교차로 선택 감시 중 일시적 조회 실패", exc_info=True)
+                    # Never let exceptions escape a Win32 hook callback.
+                    pass
+            return user32.CallNextHookEx(None, code, message, data)
 
-            # Check interruption promptly without a busy spin.
-            for _ in range(7):
-                if self.isInterruptionRequested():
-                    return
-                self.msleep(100)
+        callback = hook_type(on_mouse)
+        handle = user32.SetWindowsHookExW(
+            WH_MOUSE_LL, callback, kernel32.GetModuleHandleW(None), 0
+        )
+        if not handle:
+            error = ctypes.get_last_error()
+            raise OSError(error, "Windows 마우스 클릭 후크 등록 실패")
+
+        APP_LOG.info(
+            "검수 ID 클릭 감시 시작: '%s' 창에서 왼쪽 클릭 후 조회",
+            self.review_title,
+        )
+        try:
+            message = wintypes.MSG()
+            while not self.isInterruptionRequested():
+                while user32.PeekMessageW(
+                    ctypes.byref(message), None, 0, 0, PM_REMOVE
+                ):
+                    if message.message == WM_QUIT:
+                        return
+                    user32.TranslateMessage(ctypes.byref(message))
+                    user32.DispatchMessageW(ctypes.byref(message))
+                self.msleep(20)
+        finally:
+            user32.UnhookWindowsHookEx(handle)
+            APP_LOG.info("검수 ID 클릭 감시 종료")
