@@ -131,7 +131,22 @@ class MainWindow(QMainWindow):
                     result[key] = add_missing(result[key], default_value)
             return result
 
-        return add_missing(saved, defaults)
+        merged = add_missing(saved, defaults)
+        if merged != saved:
+            self._backup_config()
+            CONFIG.write_text(
+                yaml.safe_dump(merged, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+        return merged
+
+    def _backup_config(self) -> None:
+        if not CONFIG.exists():
+            return
+        backup_dir = ROOT / "config.backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        shutil.copy2(CONFIG, backup_dir / f"config-{stamp}.yaml")
 
     def _label(self, text: str, kind: str | None = None) -> QLabel:
         label = QLabel(text)
@@ -321,11 +336,7 @@ class MainWindow(QMainWindow):
     def _save_settings(self) -> None:
         try:
             cfg = self._current_settings()
-            if CONFIG.exists():
-                backup_dir = ROOT / "config.backups"
-                backup_dir.mkdir(parents=True, exist_ok=True)
-                stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-                shutil.copy2(CONFIG, backup_dir / f"config-{stamp}.yaml")
+            self._backup_config()
             CONFIG.write_text(
                 yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
                 encoding="utf-8",
