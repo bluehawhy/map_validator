@@ -15,7 +15,6 @@ from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QGridLayout,
@@ -257,18 +256,6 @@ class MainWindow(QMainWindow):
         for field in (self.work_input, self.view_input):
             field.editingFinished.connect(self._save_settings)
 
-        template_row = QHBoxLayout()
-        self.template_input = QLineEdit(
-            self.cfg["windows"].get("open_button_image", "assets/open_roadview.png")
-        )
-        self.template_input.setPlaceholderText("로드뷰 버튼 캡처 이미지 경로")
-        self.template_input.setToolTip("업무 프로그램의 로드뷰 열기 버튼 이미지를 선택하세요.")
-        browse = QPushButton("찾기")
-        browse.clicked.connect(self._select_template)
-        template_row.addWidget(self.template_input, 1)
-        template_row.addWidget(browse)
-        layout.addLayout(template_row)
-
         output_row = QHBoxLayout()
         self.output_input = QLineEdit(
             self.cfg.get("output", {}).get("directory", "results")
@@ -300,30 +287,22 @@ class MainWindow(QMainWindow):
         action_row.addWidget(self.step_spin)
         layout.addLayout(action_row)
 
-        self.open_first = QCheckBox("분석 시작 전에 업무 프로그램에서 로드뷰 열기")
-        layout.addWidget(self.open_first)
         layout.addWidget(self._label("※ 좌우 시점 회전 없음 · 직진/노면표시 판정 없음", "hint"))
 
-        actions = QGridLayout()
-        actions.setHorizontalSpacing(6)
-        actions.setVerticalSpacing(6)
-        self.open_btn = QPushButton("로드뷰 열기")
-        self.capture_btn = QPushButton("캡처만")
-        self.start_btn = QPushButton("좌·우 도로 후보 분석")
+        actions = QHBoxLayout()
+        actions.setSpacing(6)
+        self.capture_btn = QPushButton("캡쳐만")
+        self.start_btn = QPushButton("도로후보 분석")
         self.start_btn.setObjectName("primary")
-        self.stop_btn = QPushButton("중지")
+        self.stop_btn = QPushButton("분석 중지")
         self.stop_btn.setObjectName("danger")
         self.stop_btn.setEnabled(False)
-        self.open_btn.clicked.connect(lambda: self._start("open"))
         self.capture_btn.clicked.connect(lambda: self._start("capture"))
         self.start_btn.clicked.connect(lambda: self._start("analyze"))
         self.stop_btn.clicked.connect(self._stop)
-        actions.addWidget(self.open_btn, 0, 0)
-        actions.addWidget(self.capture_btn, 0, 1)
-        actions.addWidget(self.start_btn, 1, 0)
-        actions.addWidget(self.stop_btn, 1, 1)
-        actions.setColumnStretch(0, 1)
-        actions.setColumnStretch(1, 1)
+        actions.addWidget(self.capture_btn, 1)
+        actions.addWidget(self.start_btn, 1)
+        actions.addWidget(self.stop_btn, 1)
         layout.addLayout(actions)
 
         layout.addWidget(self._label("분석 결과 (후보일 뿐, 확정 아님)", "section"))
@@ -435,16 +414,6 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             log_exception_at_source(APP_LOG, f"{label} 선택 실패", exc)
 
-    def _select_template(self) -> None:
-        filename, _ = QFileDialog.getOpenFileName(
-            self, "로드뷰 버튼 이미지 선택", str(ROOT), "Images (*.png *.jpg *.jpeg)"
-        )
-        if filename:
-            try:
-                self.template_input.setText(str(Path(filename).relative_to(ROOT)))
-            except ValueError:
-                self.template_input.setText(filename)
-
     def _select_output(self) -> None:
         current = self.output_input.text().strip() or "results"
         start = Path(current)
@@ -500,7 +469,6 @@ class MainWindow(QMainWindow):
         cfg.setdefault("ui", {})
         cfg["windows"]["work_title"] = self.work_input.text().strip()
         cfg["windows"]["roadview_title"] = self.view_input.text().strip()
-        cfg["windows"]["open_button_image"] = self.template_input.text().strip()
         cfg["output"]["directory"] = self.output_input.text().strip() or "results"
         cfg["ui"]["opacity"] = round(self.opacity_slider.value() / 100, 2)
         return cfg
@@ -539,10 +507,8 @@ class MainWindow(QMainWindow):
                     )
                 # An empty ID is re-read in the background before capture.
             else:
-                case_id = self.case_input.text().strip()
-                if not case_id:
-                    raise ValueError("검수 ID를 입력하세요.")
-            if action in {"capture", "analyze"} and not cfg["windows"]["roadview_title"].strip():
+                raise ValueError(f"지원하지 않는 작업입니다: {action}")
+            if not cfg["windows"]["roadview_title"].strip():
                 raise ValueError("로드뷰 창 제목을 입력하세요.")
             if not cfg["windows"]["work_title"].strip():
                 raise ValueError("업무 창 제목을 입력하세요.")
@@ -556,7 +522,6 @@ class MainWindow(QMainWindow):
                 action=action,
                 movement=self.move_combo.currentData(),
                 steps=self.step_spin.value(),
-                open_first=self.open_first.isChecked() if action == "analyze" else False,
                 parent=self,
             )
             self.worker.progress.connect(self.status_label.setText)
@@ -578,10 +543,10 @@ class MainWindow(QMainWindow):
 
     def _busy(self, busy: bool) -> None:
         for widget in (
-            self.open_btn, self.capture_btn, self.start_btn, self.save_btn,
-            self.case_input, self.work_input, self.view_input, self.template_input,
+            self.capture_btn, self.start_btn, self.save_btn,
+            self.case_input, self.work_input, self.view_input,
             self.work_select_btn, self.view_select_btn, self.window_info_btn, self.output_input,
-            self.move_combo, self.step_spin, self.open_first,
+            self.move_combo, self.step_spin,
         ):
             widget.setEnabled(not busy)
         self.stop_btn.setEnabled(busy)
