@@ -587,6 +587,7 @@ class MainWindow(QMainWindow):
                 "geometry_consistent_candidate": "방향·형태 일치 후보 (검수 필요)",
                 "direction_consistent_candidate": "방향 일치 후보 (추가 확인)",
                 "possible_mismatch_review": "불일치 의심 (검수 필요)",
+                "mixed_evidence_review": "사진 간 판정 상충 (검수 필요)",
                 "insufficient_evidence": "판단 보류 (증거 부족)",
             }.get(comparison, "판단 보류 (확인 필요)")
             self.geometry_result.setText("선형 대조: " + comparison_label)
