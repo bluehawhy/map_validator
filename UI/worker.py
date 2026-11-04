@@ -24,6 +24,8 @@ from map_validator.windows import (
     click_template_in_window,
     find_window,
     move_roadview,
+    scroll_to_bottom,
+    set_zoom_value,
 )
 
 
@@ -109,7 +111,23 @@ class ControlWorker(QThread):
             if self.open_first:
                 self._open_roadview()
             self._check_stop()
-            roadview = find_window(self.config["windows"]["roadview_title"])
+
+            prep = self.config.get("preparation", {})
+            self.progress.emit("분석 화면 준비 중")
+            self._hide_before_desktop_action()
+            try:
+                zoom_value = prep.get("input_zoom", 50)
+                if zoom_value is not None:
+                    work = find_window(self.config["windows"]["work_title"])
+                    set_zoom_value(work, int(zoom_value))
+                    self.message.emit(f"입력 프로그램 zoom 설정: {int(zoom_value)}")
+
+                roadview = find_window(self.config["windows"]["roadview_title"])
+                if bool(prep.get("roadview_scroll_to_bottom", True)):
+                    scroll_to_bottom(roadview)
+                    self.message.emit("로드뷰를 맨 아래로 이동했습니다.")
+            finally:
+                self.show_panel.emit()
 
             cap = self.config.get("capture", {})
             movement_cfg = self.config["movement"]
