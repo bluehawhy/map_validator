@@ -298,7 +298,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.setObjectName("danger")
         self.stop_btn.setEnabled(False)
         self.capture_btn.clicked.connect(lambda: self._start("capture"))
-        self.start_btn.clicked.connect(self._choose_review_folder)
+        self.start_btn.clicked.connect(lambda: self._start("analyze"))
         self.stop_btn.clicked.connect(self._stop)
         actions.addWidget(self.capture_btn, 1)
         actions.addWidget(self.start_btn, 1)
@@ -486,80 +486,23 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             log_exception_at_source(APP_LOG, "설정 저장 실패", exc)
 
-    def _choose_review_folder(self) -> None:
-        """Let the user select a photo folder, then open it for manual review.
-
-        This intentionally performs no AI inference, roadview motion,
-        capture, or target-window manipulation.
-        """
-        if self.worker is not None and self.worker.isRunning():
-            return
-        try:
-            configured = Path(
-                self.output_input.text().strip() or "results"
-            ).expanduser()
-            output_root = (
-                configured if configured.is_absolute() else ROOT / configured
-            )
-            case_id = self.case_input.text().strip()
-            case_folder = output_root / case_id if case_id else None
-
-            # Start the folder picker at the selected intersection's results
-            # when available; let the user navigate elsewhere if preferred.
-            if case_folder is not None and case_folder.is_dir():
-                initial = case_folder
-            elif output_root.is_dir():
-                initial = output_root
-            elif self.latest_folder and Path(self.latest_folder).is_dir():
-                initial = Path(self.latest_folder)
-            else:
-                initial = ROOT
-
-            folder = QFileDialog.getExistingDirectory(
-                self, "도로후보 분석 - 사진 폴더 선택", str(initial)
-            )
-            if not folder:
-                return
-
-            selected = Path(folder)
-            if not selected.is_dir():
-                raise FileNotFoundError(f"사진 폴더가 존재하지 않습니다: {selected}")
-            if sys.platform != "win32":
-                raise RuntimeError("Windows 탐색기 폴더 열기는 Windows에서만 지원합니다.")
-
-            os.startfile(str(selected))
-            self.latest_folder = str(selected)
-            self.folder_btn.setEnabled(True)
-            self.status_label.setText("사진 직접 검수 중")
-            self._log(f"도로후보 수동 검수: 사진 폴더 열기 {selected}")
-            self._log(
-                "사진을 직접 확인하세요. 자동 캡처·로드뷰 이동·AI 분석은 실행하지 않습니다."
-            )
-        except Exception as exc:
-            log_exception_at_source(APP_LOG, "사진 폴더 열기 실패", exc)
-
     def _start(self, action: str) -> None:
         if self.worker is not None and self.worker.isRunning():
             return
         try:
             cfg = self._current_settings()
-            if action == "analyze":
-                if not cfg["windows"].get("intersection_review_title", "").strip():
-                    raise ValueError("config.yaml에 입력 교차로 타이틀을 설정하세요.")
-                # Resolve the selected ID on ControlWorker's QThread, never here.
-                case_id = ""
-            elif action == "capture":
-                case_id = self.case_input.text().strip()
-                if not case_id and not cfg["windows"].get(
-                    "intersection_review_title", ""
-                ).strip():
-                    raise ValueError(
-                        "검수 ID가 없습니다. 교차로 선형 검수 창을 선택하거나 "
-                        "config.yaml에 입력 교차로 타이틀을 설정하세요."
-                    )
-                # An empty ID is re-read in the background before capture.
-            else:
+            if action not in {"capture", "analyze"}:
                 raise ValueError(f"지원하지 않는 작업입니다: {action}")
+            case_id = self.case_input.text().strip()
+            if not case_id and not cfg["windows"].get(
+                "intersection_review_title", ""
+            ).strip():
+                raise ValueError(
+                    "검수 ID가 없습니다. 교차로 선형 검수 창을 선택하거나 "
+                    "config.yaml에 입력 교차로 타이틀을 설정하세요."
+                )
+            # Read a missing ID on the worker, without blocking the GUI.
+            # A populated ID always refers to the screenshots to analyze.
             if not cfg["windows"]["roadview_title"].strip():
                 raise ValueError("로드뷰 창 제목을 입력하세요.")
             if not cfg["windows"]["work_title"].strip():
@@ -583,8 +526,6 @@ class MainWindow(QMainWindow):
             self.worker.show_panel.connect(self._restore_panel)
             self.worker.finished.connect(self._done)
             self._busy(True)
-            if action == "analyze":
-                self.case_input.clear()
             self.left_result.setText("좌측: 분석 전")
             self.right_result.setText("우측: 분석 전")
             self.status_label.setText("진행 중")
@@ -635,7 +576,13 @@ class MainWindow(QMainWindow):
         self.right_result.setText("우측: " + self._result_text(result["right"]))
         self.latest_folder = result["folder"]
         self.folder_btn.setEnabled(True)
-        self._log(f"완료: {result['frames']}개 화면 저장")
+        if result.get("kind") == "analysis":
+            self._log(f"기존 스크린샷 {result['frames']}장 도로후보 분석 완료")
+            self.status_label.setText("저장된 사진 분석 완료")
+            self._log(f"분석 결과: {Path(self.latest_folder) / 'analysis.json'}")
+        else:
+            self._log(f"완료: {result['frames']}개 화면 저장")
+            self.status_label.setText("캡쳐 완료")
         self._log(f"결과 폴더: {self.latest_folder}")
         self._log("최종 판정은 반드시 사용자가 진행해야 합니다.")
 
