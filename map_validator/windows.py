@@ -70,10 +70,10 @@ def activate(window, *, allow_restore: bool = True) -> None:
 
 
 def capture_window(window, region: list[int] | None = None) -> np.ndarray:
-    """Read window pixels from HWND without activating or exposing Chrome."""
-    from .window_capture import capture_window_background
+    """Read HWND pixels using the shared Windows Graphics Capture backend."""
+    from .wgc_capture import capture_window_wgc
 
-    return capture_window_background(window, region)
+    return capture_window_wgc(window, region)
 
 
 def move_roadview(window, key: str, duration_seconds: float) -> None:
@@ -96,11 +96,8 @@ def click_template_in_window(window, template_path: str, threshold: float = 0.88
     # The template click still requires the work app to be foreground;
     # passive window capture by itself must not steal focus.
     activate(window, allow_restore=False)
-    # Never call PrintWindow on HD_3D Tool, including template matching:
-    # it can permanently blank the live 3D viewport.
-    from .work_capture import capture_work_window
-
-    image = capture_work_window(window)
+    # Shared WGC capture avoids PrintWindow, which can blank the 3D viewport.
+    image = capture_window(window)
     template = cv2.imread(str(path), cv2.IMREAD_COLOR)
     if template is None:
         raise ValueError(f"Cannot decode template: {path}")
