@@ -67,10 +67,22 @@
 
 | 코드 | 입력툴의 기대 정보 | 로드뷰의 실제 관측 | 비교 방법 |
 |---|---|---|---|
-| `stop_line` | **시안색 가로 정지선** 유무 | 실제 정지선 유무 | 시안색 **진입 선형**과 가로 정지선을 혼동하지 않음 |
+| `stop_line` | **시안색 가로 정지선** 유무 | **횡단보도와 분리된 단독 흰색 정지선** 유무 | 입·출력의 `true/false`가 같으면 `PASS`, 다르면 `FAIL`, 불분명하면 `REVIEW` |
 | `entry_lane_count` | 진입 방향 차로 수 | 실제 진입 차로 수 | 정수 값 비교, 차선 가림 시 보류 |
 | `lane_arrows` | 차로별 좌·직·우 및 복합 화살표 | 실제 노면 화살표 | 차로별 위치와 조합까지 비교 |
 | `colored_guidance` | 컬러유도선 유무·색상·개수 | 실제 컬러유도선 유무·색상·개수 | 조명·마모·가림 때문에 불명확하면 보류 |
+
+### 정지선 유무 비교 디자인 · 실험적 구현
+
+진입 전(`before`) 촬영본에서만 **정지선 존재 여부**를 대조한다.
+
+- **입력툴:** 검은 도면에서 **시안색 가로줄**이 정지선 기준이다. 시안색 세로 진입 경로 또는 다른 색의 도로선은 정지선이 아니다.
+- **로드뷰:** 실제 도로의 **흰색 단독 정지선**만 후보로 인정한다. 횡단보도(흰색/노란색 반복 줄무늬)와 구분하고, 횡단보도만 있는 장면에서 자동으로 정지선 존재라고 하지 않는다.
+- **threshold 조절:** UI의 **로드뷰 정지선 threshold** (`0.35~0.95`, 초기 `0.68`). 높을수록 로드뷰의 정지선 유무를 더 엄격히 판정하고, 부족하면 수동 검수를 요청한다. 설정 키 `analysis.stop_line_roadview_threshold`; 개인 설정 `config.yaml`에 저장.
+- **정지선 전용 결과:** `PASS`(존재 여부 같음), `FAIL`(다름), `REVIEW`(둘 중 하나 이상 불명확). 일반적인 도로 후보 상태(`match_candidate/mismatch_review/insufficient_evidence`)는 호환을 위해 함께 기록.
+- **근거:** 도면에서 검출한 시안색 가로선과 로드뷰에서 발견한 단독 흰색 정지선을 `overlays/before_*_input.png` 및 `overlays/before_*_roadview.png`에 표시. 불명확한 사진에서는 선을 만들어 그리지 않는다.
+- **기록:** `staged_analysis.json`의 `stages.before.comparison.stop_line.verdict`, `stages.before.stop_line_verdict`, `summary.stop_line_verdict`, `summary.stop_line_roadview_threshold`.
+- **현장 보정:** 검출 점수와 횡단보도·정지선의 실제 위치를 여러 사진으로 검토한 뒤 임계값/영역을 개선한다. **FAIL이라도 사람의 최종 검수가 필요**하다.
 
 ### 교차로 진입 후 (좌 / 직 / 우 각각)
 
