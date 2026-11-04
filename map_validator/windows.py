@@ -357,7 +357,7 @@ def _read_win32_intersection(handle: int) -> str | None:
     return None
 
 
-def read_selected_intersection_id(title_keyword: str) -> str:
+def read_selected_intersection_id(title_keyword: str, diagnostic=None) -> str:
     """Read Polygon/Link selection from the review dialog without focus changes.
 
     Prefer HWND-based lookup to avoid enumerating the entire UI Automation
@@ -367,16 +367,30 @@ def read_selected_intersection_id(title_keyword: str) -> str:
     import pygetwindow as gw
     from pywinauto import Desktop
 
+    def timed(label, operation):
+        if diagnostic is None:
+            return operation()
+        diagnostic(f"{label} 시작")
+        started = time.monotonic()
+        outcome = "완료"
+        try:
+            return operation()
+        except Exception:
+            outcome = "오류"
+            raise
+        finally:
+            diagnostic(f"{label} {outcome} · {(time.monotonic() - started) * 1000:.0f}ms")
+
     configured_key = _comparable_title(title_keyword)
     if not configured_key:
         raise ValueError("Intersection review window title cannot be empty")
 
     win32_matches = []
     try:
-        win32_matches = [
+        win32_matches = timed("Win32 창 목록 조회", lambda: [
             window for window in gw.getAllWindows()
             if configured_key in _comparable_title(window.title)
-        ]
+        ])
     except Exception:
         pass
 
@@ -390,7 +404,7 @@ def read_selected_intersection_id(title_keyword: str) -> str:
         # Native SysTreeView32 lookup is significantly cheaper than a full
         # UI Automation descendants() scan and never changes window focus.
         for handle in handles:
-            result = _read_win32_intersection(handle)
+            result = timed("Win32 트리 선택 조회", lambda: _read_win32_intersection(handle))
             if result:
                 return result
 
@@ -398,8 +412,8 @@ def read_selected_intersection_id(title_keyword: str) -> str:
         # Use the slower UIA path only when the fast native lookup fails.
         for handle in handles:
             try:
-                wrapper = Desktop(backend="uia").window(handle=handle).wrapper_object()
-                result = _read_uia_intersection(wrapper)
+                wrapper = timed("UIA 창 연결", lambda: Desktop(backend="uia").window(handle=handle).wrapper_object())
+                result = timed("UIA 트리 선택 조회", lambda: _read_uia_intersection(wrapper))
                 if result:
                     return result
             except Exception:
@@ -408,10 +422,10 @@ def read_selected_intersection_id(title_keyword: str) -> str:
         # Only use the expensive desktop UIA enumeration for dialogs that
         # Win32 cannot see at all.
         try:
-            uia_matches = [
+            uia_matches = timed("UIA 전체 창 검색", lambda: [
                 window for window in Desktop(backend="uia").windows()
                 if configured_key in _comparable_title(window.window_text())
-            ]
+            ])
         except Exception:
             uia_matches = []
 
@@ -421,13 +435,13 @@ def read_selected_intersection_id(title_keyword: str) -> str:
             )
 
         for window in uia_matches:
-            result = _read_uia_intersection(window)
+            result = timed("UIA 트리 선택 조회", lambda: _read_uia_intersection(window))
             if result:
                 return result
             try:
                 handle = int(window.handle)
                 if handle:
-                    result = _read_win32_intersection(handle)
+                    result = timed("Win32 트리 선택 조회", lambda: _read_win32_intersection(handle))
                     if result:
                         return result
             except Exception:
