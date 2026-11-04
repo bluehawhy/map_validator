@@ -5,7 +5,10 @@ This dialog is read-only: it never activates windows or writes to config.yaml.
 from __future__ import annotations
 
 import ctypes
+import logging
 from ctypes import wintypes
+
+APP_LOG = logging.getLogger("map_validator.ui.window_info")
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -120,6 +123,7 @@ class WindowInfoDialog(QDialog):
             )
             self._filter_windows()
         except Exception as exc:
+            APP_LOG.exception("창 목록 조회 실패")
             self.status.setText(f"창 목록 조회 실패: {exc}")
 
     def _filter_windows(self) -> None:
@@ -182,6 +186,7 @@ class WindowInfoDialog(QDialog):
                 + " · 조회한 내용은 설정 파일에 저장하지 않습니다."
             )
         except Exception as exc:
+            APP_LOG.exception("창 내부 정보 조회 실패: %s", root.text(0))
             root.addChild(QTreeWidgetItem([f"내부 항목 조회 실패: {exc}", "", ""]))
             self.tree.expandItem(root)
             self.status.setText(
