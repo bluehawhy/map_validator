@@ -558,7 +558,7 @@ class MainWindow(QMainWindow):
                 action=action,
                 movement=self.move_combo.currentData(),
                 steps=self.step_spin.value(),
-                open_first=self.open_first.isChecked() if action != "open" else False,
+                open_first=self.open_first.isChecked() if action == "analyze" else False,
                 parent=self,
             )
             self.worker.progress.connect(self.status_label.setText)
