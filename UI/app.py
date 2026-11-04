@@ -279,6 +279,7 @@ class MainWindow(QMainWindow):
         )
         output_browse = QPushButton("찾기")
         output_browse.clicked.connect(self._select_output)
+        self.output_input.editingFinished.connect(self._save_settings)
         output_row.addWidget(self._label("저장 경로"))
         output_row.addWidget(self.output_input, 1)
         output_row.addWidget(output_browse)
@@ -455,6 +456,8 @@ class MainWindow(QMainWindow):
                 self.output_input.setText(str(selected.relative_to(ROOT)))
             except ValueError:
                 self.output_input.setText(str(selected))
+            # Folder-picker changes do not fire editingFinished on QLineEdit.
+            self._save_settings()
 
     def _start_review_monitor(self) -> None:
         from .review_monitor import ReviewSelectionMonitor
