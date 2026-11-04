@@ -16,10 +16,17 @@ map_validator/
 │   ├── road_analysis.py         # 로드뷰 도로 영역 분할
 │   ├── road_shape.py            # 로드뷰 도로 중심 경로 형상 추정
 │   ├── line_geometry.py         # 입력툴 색상 선형 추출·대조 후보 계산
-│   ├── saved_analysis.py        # 저장된 두 화면 대조와 분석 보고서
+│   ├── saved_analysis.py        # 기존 형식 이미지 비교(호환용)
+│   ├── stage_types.py           # 진입 전·좌·직·우 단계와 검수 필드
+│   ├── staged_capture.py        # 단계별 사진 쌍·재촬영 버전·manifest
+│   ├── input_features.py        # HD_3D Tool의 기대값 후보
+│   ├── roadview_features.py     # 도로/건물 및 노면표시 후보
+│   ├── staged_compare.py        # 4단계 비교·근거 이미지·JSON
 │   └── wgc_capture.py           # 두 창 공용 비활성 캡처
 ├── docs/                        # 프로젝트/개발 문서
 │   ├── PROJECT_CONCEPT.md       # 목적, 사용자 흐름, 범위
+│   ├── PROJECT_GUIDELINES.md    # 모든 작업 전 확인할 지침
+│   ├── INTERSECTION_REVIEW_DESIGN.md # 4단계 UI·데이터 명세
 │   ├── REQUIREMENTS.md          # 요구사항과 결과 해석 기준
 │   ├── ARCHITECTURE.md          # 구성요소와 데이터 흐름
 │   ├── FOLDER_STRUCTURE.md      # 폴더별 책임
@@ -32,6 +39,7 @@ map_validator/
 ├── requirements.txt             # 공통 의존성
 ├── requirements-ui.txt          # UI 의존성
 ├── requirements-ai.txt          # 선택 AI 의존성
+├── AGENTS.md                    # AI 개발 작업용 필수 지침
 └── README.md
 ```
 
@@ -56,10 +64,14 @@ map_validator/
 | 도로 마스크와 좌·우 후보 표시 | `map_validator/road_analysis.py` |
 | 로드뷰의 도로 중심 경로 추정 | `map_validator/road_shape.py` |
 | 입력툴의 하늘색→주황색→파란색 선형 경로 추출 및 후보 대조 | `map_validator/line_geometry.py` |
-| 저장된 화면 분석 및 보고서 | `map_validator/saved_analysis.py` |
+| 기존 형식 이미지 비교 | `map_validator/saved_analysis.py` |
+| 단계별 촬영 상태·이미지 쌍 이력 | `map_validator/stage_types.py`, `staged_capture.py` |
+| 입력툴 기대값(정지선·색상 선형) | `map_validator/input_features.py` |
+| 로드뷰 실제 관측(도로·건물 등) | `map_validator/roadview_features.py` |
+| 4단계 검수 비교/보고서 | `map_validator/staged_compare.py` |
 | 두 프로그램 비활성 캡처 | `map_validator/wgc_capture.py` |
 | CLI 인자와 전체 작업 실행 | `map_validator/cli.py` |
 | PyQt6 사용자 인터페이스 | `UI/` |
 | 보고서 형식·판정 상태 설명 | `docs/REQUIREMENTS.md` 및 엔진 보고서 코드 |
 
-2D 경로 색상 인식과 로드뷰의 방향·곡률 후보 대조는 이미 입력 화면 분석·경로 추정·사진 보고서 모듈로 분리했다. 향후 정확한 3D 도로 좌표 비교가 필요하면 지도 기준점·카메라 자세·위치 보정 기능을 별도 모듈로 설계한다. 실제 데이터와 결과는 `results/`, `config.yaml`, 로컬 캐시에 두고 버전 관리하지 않는다.
+새로 구현한 4단계 수동 촬영·선형/도로/건물 후보 비교는 단계 정의, 이미지 추출, 검수 비교 모듈로 분리했다. 차로 수·복합 화살표·유도선 개수 등의 정확한 자동 인식은 현장 표본과 명확한 입력툴 표시 기준을 바탕으로 보완한다. 향후 정확한 3D 도로 좌표 비교가 필요하면 지도 기준점·카메라 자세·위치 보정 기능을 별도 모듈로 설계한다. 실제 데이터와 결과는 `results/`, `config.yaml`, 로컬 캐시에 두고 버전 관리하지 않는다.
