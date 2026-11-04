@@ -1,6 +1,7 @@
 """Window-safe capture and keyboard control. Windows only."""
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -90,12 +91,14 @@ def scroll_to_bottom(window) -> None:
 
 
 def set_zoom_value(window, value: int) -> None:
-    """Set the numeric edit nearest a UI Automation element containing 'zoom'."""
+    """Reach the requested zoom by scrolling over the zoom number and reading changes."""
     from pywinauto import Desktop
 
-    if not 1 <= int(value) <= 500:
+    requested = int(value)
+    if not 1 <= requested <= 500:
         raise ValueError("zoom value must be between 1 and 500")
 
+    activate(window)
     title = window.title.strip()
     candidates = Desktop(backend="uia").windows(title=title)
     if not candidates:
@@ -107,29 +110,97 @@ def set_zoom_value(window, value: int) -> None:
         control for control in controls
         if "zoom" in control.window_text().casefold()
     ]
-    edits = [
-        control for control in controls
-        if control.element_info.control_type in {"Edit", "Spinner"}
-    ]
     if not zoom_labels:
         raise RuntimeError("zoom label was not exposed through Windows UI Automation")
-    if not edits:
-        raise RuntimeError("zoom numeric input was not exposed through Windows UI Automation")
 
-    label_rect = zoom_labels[0].rectangle()
+    label = zoom_labels[0]
+    label_rect = label.rectangle()
 
-    def distance(control) -> tuple[int, int]:
+    def numeric_value(control) -> int | None:
+        texts: list[str] = []
+        try:
+            texts.append(control.window_text())
+        except Exception:
+            pass
+        try:
+            texts.extend(control.texts())
+        except Exception:
+            pass
+        try:
+            texts.append(str(control.get_value()))
+        except Exception:
+            pass
+        for text in texts:
+            numbers = re.findall(r"(?<![A-Za-z])\d{1,3}(?![A-Za-z])", str(text))
+            if numbers:
+                return int(numbers[-1])
+        return None
+
+    same_row = []
+    label_center_y = (label_rect.top + label_rect.bottom) // 2
+    for control in controls:
+        try:
+            rect = control.rectangle()
+        except Exception:
+            continue
+        center_y = (rect.top + rect.bottom) // 2
+        if abs(center_y - label_center_y) <= max(20, label_rect.height()):
+            number = numeric_value(control)
+            if number is not None:
+                same_row.append((control, number))
+
+    label_number = numeric_value(label)
+    if label_number is not None:
+        same_row.append((label, label_number))
+    if not same_row:
+        raise RuntimeError("zoom number was not exposed through Windows UI Automation")
+
+    def candidate_score(item) -> tuple[int, int]:
+        control, _ = item
         rect = control.rectangle()
-        vertical = abs((rect.top + rect.bottom) - (label_rect.top + label_rect.bottom))
-        right_side_penalty = 0 if rect.left >= label_rect.left else 10000
-        return vertical + right_side_penalty, abs(rect.left - label_rect.right)
+        right_penalty = 0 if rect.left >= label_rect.left else 10000
+        return right_penalty + abs(rect.top - label_rect.top), abs(rect.left - label_rect.right)
 
-    zoom_input = min(edits, key=distance)
-    try:
-        zoom_input.set_edit_text(str(int(value)))
-    except Exception:
-        zoom_input.click_input()
-        zoom_input.type_keys("^a" + str(int(value)) + "{ENTER}", set_foreground=False)
+    zoom_control, current = min(same_row, key=candidate_score)
+    rect = zoom_control.rectangle()
+    x = (rect.left + rect.right) // 2
+    y = (rect.top + rect.bottom) // 2
+    pyautogui.moveTo(x, y, duration=0.15)
+
+    def read_current() -> int:
+        result = numeric_value(zoom_control)
+        if result is None:
+            raise RuntimeError("zoom number could not be read after scrolling")
+        return result
+
+    if current == requested:
+        return
+
+    pyautogui.scroll(1)
+    time.sleep(0.15)
+    after_up = read_current()
+    if after_up != current:
+        increase_scroll = 1 if after_up > current else -1
+        current = after_up
     else:
-        zoom_input.type_keys("{ENTER}", set_foreground=False)
-    time.sleep(0.3)
+        pyautogui.scroll(-1)
+        time.sleep(0.15)
+        after_down = read_current()
+        if after_down == current:
+            raise RuntimeError("zoom value did not change when the mouse wheel was scrolled")
+        increase_scroll = -1 if after_down > current else 1
+        current = after_down
+
+    for _ in range(250):
+        if current == requested:
+            return
+        direction = increase_scroll if requested > current else -increase_scroll
+        pyautogui.scroll(direction)
+        time.sleep(0.08)
+        updated = read_current()
+        if updated == current:
+            raise RuntimeError(f"zoom stopped changing at {current}; target is {requested}")
+        current = updated
+
+    raise RuntimeError(f"zoom could not reach {requested}; last value was {current}")
+
