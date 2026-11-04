@@ -57,8 +57,11 @@ def trace_road_corridor(mask: np.ndarray) -> dict[str, Any]:
         if not (0 <= row_y < height):
             continue
         line = (labels[row_y] == component_id).astype(np.uint8)
-        starts = np.where(np.diff(np.r_[0, line, 0]) == 1)[0]
-        ends = np.where(np.diff(np.r_[0, line, 0]) == -1)[0]
+        transitions = np.diff(
+            np.pad(line.astype(np.int16), (1, 1), constant_values=0)
+        )
+        starts = np.where(transitions == 1)[0]
+        ends = np.where(transitions == -1)[0]
         spans = [
             (int(start), int(end))
             for start, end in zip(starts, ends)
