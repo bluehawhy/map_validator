@@ -312,6 +312,8 @@ class MainWindow(QMainWindow):
         decision_row.addWidget(self.left_result, 1)
         decision_row.addWidget(self.right_result, 1)
         layout.addLayout(decision_row)
+        self.geometry_result = self._label("선형 대조: 분석 전", "decision")
+        layout.addWidget(self.geometry_result)
 
         layout.addWidget(self._label("작업 로그", "section"))
         self.logs = QTextEdit()
@@ -528,6 +530,7 @@ class MainWindow(QMainWindow):
             self._busy(True)
             self.left_result.setText("좌측: 분석 전")
             self.right_result.setText("우측: 분석 전")
+            self.geometry_result.setText("선형 대조: 분석 전")
             self.status_label.setText("진행 중")
             self._log(f"시작: {action} / {case_id or '교차로 선택값 조회 중'}")
             self.worker.start()
@@ -577,8 +580,19 @@ class MainWindow(QMainWindow):
         self.latest_folder = result["folder"]
         self.folder_btn.setEnabled(True)
         if result.get("kind") == "analysis":
+            comparison = result.get(
+                "geometry_comparison_status", "insufficient_evidence"
+            )
+            comparison_label = {
+                "geometry_consistent_candidate": "방향·형태 일치 후보 (검수 필요)",
+                "direction_consistent_candidate": "방향 일치 후보 (추가 확인)",
+                "possible_mismatch_review": "불일치 의심 (검수 필요)",
+                "insufficient_evidence": "판단 보류 (증거 부족)",
+            }.get(comparison, "판단 보류 (확인 필요)")
+            self.geometry_result.setText("선형 대조: " + comparison_label)
             self._log(f"기존 스크린샷 {result['frames']}장 도로후보 분석 완료")
-            self.status_label.setText("저장된 사진 분석 완료")
+            self._log(f"입력툴 선형 ↔ 로드뷰 대조: {comparison_label}")
+            self.status_label.setText("저장된 사진 선형 대조 완료")
             self._log(f"분석 결과: {Path(self.latest_folder) / 'analysis.json'}")
         else:
             self._log(f"완료: {result['frames']}개 화면 저장")
