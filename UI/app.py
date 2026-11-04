@@ -18,10 +18,12 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QSlider,
     QSpinBox,
     QTextEdit,
     QVBoxLayout,
@@ -32,47 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config.yaml"
 EXAMPLE = ROOT / "config.example.yaml"
 
-STYLE = """
-QWidget#panel {
-    background-color: rgba(243, 243, 243, 246);
-    border-radius: 20px;
-    border: 1px solid rgba(225, 228, 232, 215);
-}
-QWidget#header, QWidget#body, QWidget#content { background: transparent; }
-QLabel { color: #313C45; background: transparent; font-size: 11px; }
-QLabel#title { color: #263540; font-size: 16px; font-weight: bold; }
-QLabel#status {
-    color: #2871A3; background: rgba(255,255,255,125);
-    border-radius: 7px; padding: 5px 8px; font-weight: bold;
-}
-QLabel#hint { color: #71808B; font-size: 10px; }
-QLabel#section { font-weight: bold; color: #44525D; padding-top: 5px; }
-QLabel#decision { color: #53616D; font-weight: bold; }
-QLineEdit, QComboBox, QSpinBox {
-    color: #263540; background-color: rgba(255, 255, 255, 185);
-    border: 1px solid rgba(200, 205, 210, 180);
-    border-radius: 8px; padding: 6px 7px; font-size: 11px;
-    min-height: 19px;
-}
-QComboBox::drop-down { border: 0px; width: 18px; }
-QCheckBox { color: #53616D; background: transparent; font-size: 11px; spacing: 7px; }
-QPushButton {
-    color: #46545E; background-color: rgba(255, 255, 255, 190);
-    border: 1px solid rgba(205, 211, 216, 140);
-    border-radius: 8px; padding: 7px; font-size: 11px;
-}
-QPushButton:hover { background-color: rgba(228, 240, 247, 235); }
-QPushButton:disabled { color: #AAB2B9; background-color: rgba(255,255,255,95); }
-QPushButton#primary { background: #3683B4; color: white; font-weight: bold; border: none; }
-QPushButton#primary:hover { background: #2573A7; }
-QPushButton#danger { color: #C34F4F; }
-QPushButton#header_button { min-width: 22px; max-width: 22px; padding: 1px; }
-QTextEdit {
-    color: #40505B; background: rgba(255, 255, 255, 125);
-    border: 1px solid rgba(220, 223, 226, 140);
-    border-radius: 9px; font-size: 11px; padding: 6px;
-}
-"""
+STYLE_FILE = Path(__file__).with_name("style.qss")
 
 
 class DragHeader(QWidget):
@@ -164,10 +126,11 @@ class MainWindow(QMainWindow):
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedSize(428, 730)
+        self.setFixedSize(470, 730)
+        opacity = float(self.cfg.get("ui", {}).get("opacity", 0.92))
+        self.setWindowOpacity(max(0.35, min(opacity, 1.0)))
         outer = QWidget()
         outer.setObjectName("panel")
-        outer.setStyleSheet(STYLE)
         self.setCentralWidget(outer)
         layout = QVBoxLayout(outer)
         layout.setContentsMargins(18, 14, 18, 15)
@@ -178,10 +141,25 @@ class MainWindow(QMainWindow):
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.addWidget(self._label("🛣  map_validator", "title"))
         header_layout.addStretch(1)
-        for label, callback in (("—", self.showMinimized), ("×", self.close)):
+        header_layout.addWidget(self._label("투명도", "hint"))
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setRange(35, 100)
+        self.opacity_slider.setFixedWidth(72)
+        self.opacity_slider.setToolTip("제어창 투명도")
+        self.opacity_slider.setValue(round(self.windowOpacity() * 100))
+        self.opacity_slider.valueChanged.connect(
+            lambda value: self.setWindowOpacity(value / 100)
+        )
+        self.opacity_slider.sliderReleased.connect(self._save_settings)
+        header_layout.addWidget(self.opacity_slider)
+        for label, callback, tooltip in (
+            ("—", self.showMinimized, "숨기기 (Esc)"),
+            ("×", self.close, "종료"),
+        ):
             btn = QPushButton(label)
             btn.setObjectName("header_button")
             btn.setFixedSize(25, 23)
+            btn.setToolTip(tooltip)
             btn.clicked.connect(callback)
             header_layout.addWidget(btn)
         layout.addWidget(header)
@@ -193,18 +171,39 @@ class MainWindow(QMainWindow):
         basic_grid = QGridLayout()
         basic_grid.setHorizontalSpacing(8)
         basic_grid.setVerticalSpacing(6)
-        self.case_input = QLineEdit("intersection_001")
-        self.case_input.setPlaceholderText("예: intersection_001")
-        basic_grid.addWidget(self._label("검수 ID"), 0, 0)
-        basic_grid.addWidget(self.case_input, 0, 1)
         self.work_input = QLineEdit(self.cfg["windows"].get("work_title", ""))
-        basic_grid.addWidget(self._label("업무 창 제목"), 1, 0)
-        basic_grid.addWidget(self.work_input, 1, 1)
+        self.work_input.setPlaceholderText("이미 실행 중인 입력 프로그램 창")
+        self.work_select_btn = QPushButton("선택")
+        self.work_select_btn.setObjectName("select_button")
+        self.work_select_btn.clicked.connect(
+            lambda: self._select_running_window(self.work_input, "입력 프로그램")
+        )
+        basic_grid.addWidget(self._label("입력 프로그램"), 0, 0)
+        basic_grid.addWidget(self.work_input, 0, 1)
+        basic_grid.addWidget(self.work_select_btn, 0, 2)
+
         self.view_input = QLineEdit(self.cfg["windows"].get("roadview_title", ""))
-        basic_grid.addWidget(self._label("로드뷰 창 제목"), 2, 0)
-        basic_grid.addWidget(self.view_input, 2, 1)
+        self.view_input.setPlaceholderText("이미 실행 중인 로드뷰 프로그램 창")
+        self.view_select_btn = QPushButton("선택")
+        self.view_select_btn.setObjectName("select_button")
+        self.view_select_btn.clicked.connect(
+            lambda: self._select_running_window(self.view_input, "로드뷰 프로그램")
+        )
+        basic_grid.addWidget(self._label("로드뷰 프로그램"), 1, 0)
+        basic_grid.addWidget(self.view_input, 1, 1)
+        basic_grid.addWidget(self.view_select_btn, 1, 2)
+
+        self.case_input = QLineEdit(
+            self.cfg.get("ui", {}).get("last_case_id", "intersection_001")
+        )
+        self.case_input.setPlaceholderText("예: intersection_001")
+        basic_grid.addWidget(self._label("검수 ID"), 2, 0)
+        basic_grid.addWidget(self.case_input, 2, 1, 1, 2)
         basic_grid.setColumnStretch(1, 1)
         layout.addLayout(basic_grid)
+
+        for field in (self.work_input, self.view_input, self.case_input):
+            field.editingFinished.connect(self._save_settings)
 
         template_row = QHBoxLayout()
         self.template_input = QLineEdit(
@@ -300,6 +299,45 @@ class MainWindow(QMainWindow):
         layout.addLayout(footer)
         self._log("준비 완료. 캡처 전에 로드뷰 창 제목을 확인하세요.")
 
+    def _select_running_window(self, field: QLineEdit, label: str) -> None:
+        try:
+            import pygetwindow as gw
+
+            windows = [
+                window for window in gw.getAllWindows()
+                if window.title.strip()
+                and window.title.strip() != self.windowTitle()
+                and window.width > 150
+                and window.height > 150
+            ]
+            titles = sorted({window.title.strip() for window in windows})
+            if not titles:
+                raise RuntimeError("선택할 수 있는 실행 중인 창이 없습니다.")
+
+            current = field.text().strip()
+            current_index = titles.index(current) if current in titles else 0
+            selected, accepted = QInputDialog.getItem(
+                self,
+                f"{label} 선택",
+                "실행 중인 창:",
+                titles,
+                current_index,
+                False,
+            )
+            if not accepted or not selected:
+                return
+
+            field.setText(selected)
+            self._save_settings()
+            for window in windows:
+                if window.title.strip() == selected:
+                    if window.isMinimized:
+                        window.restore()
+                    window.activate()
+                    break
+        except Exception as exc:
+            self._log(f"{label} 선택 실패: {exc}")
+
     def _select_template(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self, "로드뷰 버튼 이미지 선택", str(ROOT), "Images (*.png *.jpg *.jpeg)"
@@ -331,10 +369,13 @@ class MainWindow(QMainWindow):
         cfg = self._read_settings()
         cfg.setdefault("windows", {})
         cfg.setdefault("output", {})
+        cfg.setdefault("ui", {})
         cfg["windows"]["work_title"] = self.work_input.text().strip()
         cfg["windows"]["roadview_title"] = self.view_input.text().strip()
         cfg["windows"]["open_button_image"] = self.template_input.text().strip()
         cfg["output"]["directory"] = self.output_input.text().strip() or "results"
+        cfg["ui"]["last_case_id"] = self.case_input.text().strip()
+        cfg["ui"]["opacity"] = round(self.opacity_slider.value() / 100, 2)
         return cfg
 
     def _save_settings(self) -> None:
@@ -396,7 +437,8 @@ class MainWindow(QMainWindow):
         for widget in (
             self.open_btn, self.capture_btn, self.start_btn, self.save_btn,
             self.case_input, self.work_input, self.view_input, self.template_input,
-            self.output_input, self.move_combo, self.step_spin, self.open_first,
+            self.work_select_btn, self.view_select_btn, self.output_input,
+            self.move_combo, self.step_spin, self.open_first,
         ):
             widget.setEnabled(not busy)
         self.stop_btn.setEnabled(busy)
@@ -455,6 +497,13 @@ class MainWindow(QMainWindow):
         bar = self.logs.verticalScrollBar()
         bar.setValue(bar.maximum())
 
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.showMinimized()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def closeEvent(self, event) -> None:
         if self.worker is not None and self.worker.isRunning():
             self._stop()
@@ -466,6 +515,9 @@ class MainWindow(QMainWindow):
 
 def main() -> int:
     app = QApplication(sys.argv)
+    if not STYLE_FILE.exists():
+        raise FileNotFoundError(f"UI 스타일 파일이 없습니다: {STYLE_FILE}")
+    app.setStyleSheet(STYLE_FILE.read_text(encoding="utf-8"))
     app.setFont(QFont("Malgun Gothic", 10))
     app.setQuitOnLastWindowClosed(True)
     window = MainWindow()
