@@ -97,8 +97,8 @@ class ControlWorker(QThread):
 
     def run(self) -> None:
         try:
-            if not re.fullmatch(r"[A-Za-z0-9_-]+", self.case_id):
-                raise ValueError("작업 ID는 영문/숫자/-/_만 사용할 수 있습니다.")
+            if not re.fullmatch(r"[A-Za-z0-9 _-]+", self.case_id):
+                raise ValueError("작업 ID는 영문/숫자/공백/-/_만 사용할 수 있습니다.")
             if self.action not in {"open", "capture", "analyze"}:
                 raise ValueError("지원하지 않는 작업입니다.")
             if self.movement not in {"none", "forward", "backward"}:
