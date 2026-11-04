@@ -115,6 +115,10 @@ class MainWindow(QMainWindow):
         if not isinstance(defaults, dict):
             raise ValueError("설정 예제 YAML 내용이 올바르지 않습니다.")
         if not CONFIG.exists():
+            CONFIG.write_text(
+                yaml.safe_dump(defaults, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
             return defaults
 
         saved = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
