@@ -183,7 +183,14 @@ class MainWindow(QMainWindow):
         self.status_label = self._label("준비됨 | 현장 최종 검수 필요", "status")
         layout.addWidget(self.status_label)
 
-        layout.addWidget(self._label("대상 설정", "section"))
+        target_header = QHBoxLayout()
+        target_header.addWidget(self._label("대상 설정", "section"))
+        target_header.addStretch(1)
+        self.window_info_btn = QPushButton("창 정보 보기")
+        self.window_info_btn.setToolTip("현재 열린 Windows 창과 하위 컨트롤 정보를 확인합니다.")
+        self.window_info_btn.clicked.connect(self._show_window_info)
+        target_header.addWidget(self.window_info_btn)
+        layout.addLayout(target_header)
         basic_grid = QGridLayout()
         basic_grid.setHorizontalSpacing(8)
         basic_grid.setVerticalSpacing(6)
@@ -320,6 +327,12 @@ class MainWindow(QMainWindow):
         if " - " in title:
             title = title.split(" - ", 1)[0].strip()
         return title
+
+    def _show_window_info(self) -> None:
+        from .window_info_dialog import WindowInfoDialog
+
+        dialog = WindowInfoDialog(self)
+        dialog.exec()
 
     def _activate_configured_window(self, field: QLineEdit, label: str) -> None:
         try:
@@ -524,7 +537,7 @@ class MainWindow(QMainWindow):
         for widget in (
             self.open_btn, self.capture_btn, self.start_btn, self.save_btn,
             self.case_input, self.work_input, self.view_input, self.template_input,
-            self.work_select_btn, self.view_select_btn, self.output_input,
+            self.work_select_btn, self.view_select_btn, self.window_info_btn, self.output_input,
             self.move_combo, self.step_spin, self.open_first,
         ):
             widget.setEnabled(not busy)
