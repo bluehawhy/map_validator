@@ -18,6 +18,7 @@ import numpy as np
 from .capture_naming import capture_file_name
 from .line_geometry import extract_line_geometry, compare_with_roadview
 from .road_analysis import RoadSegmenter, analyze_road_mask, draw_review_overlay
+from .road_shape import trace_road_corridor, draw_road_corridor
 
 
 def _roadview_screenshots(folder: Path, case_id: str, roadview_title: str) -> list[Path]:
@@ -127,10 +128,14 @@ def analyze_saved_images(
         mask = segmenter.mask(frame)
         check_stop()
         direction = analyze_road_mask(mask, threshold, vertical_range)
+        road_corridor = trace_road_corridor(mask)
         check_stop()
         input_geometry, input_overlay, input_image = work_geometry(source)
-        comparison = compare_with_roadview(input_geometry, direction.as_dict())
+        comparison = compare_with_roadview(
+            input_geometry, direction.as_dict(), road_corridor
+        )
         overlay = draw_review_overlay(frame, mask, direction, vertical_range)
+        overlay = draw_road_corridor(overlay, road_corridor)
         comparison_label = (
             f"INPUT {comparison['expected_turn'].upper()}: "
             f"{comparison['status'].upper()}"
@@ -153,6 +158,7 @@ def analyze_saved_images(
             "work_image": input_image,
             "work_geometry_overlay": input_overlay,
             "input_line_geometry": input_geometry,
+            "roadview_corridor": road_corridor,
             "geometry_comparison": comparison,
             **direction.as_dict(),
         })
@@ -168,7 +174,9 @@ def analyze_saved_images(
     comparison_statuses = [
         frame["geometry_comparison"]["status"] for frame in frames
     ]
-    if "direction_consistent_candidate" in comparison_statuses:
+    if "geometry_consistent_candidate" in comparison_statuses:
+        overall_comparison = "geometry_consistent_candidate"
+    elif "direction_consistent_candidate" in comparison_statuses:
         overall_comparison = "direction_consistent_candidate"
     elif "possible_mismatch_review" in comparison_statuses:
         overall_comparison = "possible_mismatch_review"
@@ -186,7 +194,7 @@ def analyze_saved_images(
         "final_decision": "requires_human_review",
         "warning": (
             "Cyan entry -> orange connector -> blue exit from the work image "
-            "is compared with a 2D roadview segmentation direction candidate. "
+            "is compared with roadview road-corridor curvature and branch candidates. "
             "No calibrated 3D alignment or lane-connectivity proof is possible "
             "from these screenshots alone. Human verification is required."
         ),
