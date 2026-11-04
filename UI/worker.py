@@ -36,6 +36,7 @@ from map_validator.windows import (
 
 class ControlWorker(QThread):
     progress = pyqtSignal(str)
+    case_id_ready = pyqtSignal(str)
     result_ready = pyqtSignal(dict)
     hide_panel = pyqtSignal()
     show_panel = pyqtSignal()
@@ -105,6 +106,23 @@ class ControlWorker(QThread):
 
     def run(self) -> None:
         try:
+            if self.action == "analyze":
+                # UIA/Win32 tree inspection can block for seconds. Never run it
+                # in MainWindow._start() on the GUI event loop.
+                self._progress("선택 교차로 검수 ID 확인 중")
+                self._check_stop()
+                from map_validator.windows import read_selected_intersection_id
+
+                review_title = self.config.get("windows", {}).get(
+                    "intersection_review_title", ""
+                ).strip()
+                if not review_title:
+                    raise ValueError("config.yaml에 입력 교차로 타이틀을 설정하세요.")
+                self.case_id = read_selected_intersection_id(review_title)
+                self._check_stop()
+                self.case_id_ready.emit(self.case_id)
+                APP_LOG.info("선택 교차로 검수 ID: %s", self.case_id)
+
             if not re.fullmatch(r"[A-Za-z0-9 _-]+", self.case_id):
                 raise ValueError("작업 ID는 영문/숫자/공백/-/_만 사용할 수 있습니다.")
             if self.action not in {"open", "capture", "analyze"}:
