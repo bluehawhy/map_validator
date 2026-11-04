@@ -60,8 +60,25 @@ def compare_values(expected: dict, observed: dict, field: str) -> dict:
             )
         else:
             reason = "입력툴 기대값과 로드뷰 관측값이 다릅니다. 사람 검수가 필요합니다."
+    if field == "stop_line":
+        verdict = (
+            "REVIEW" if lhs is None or rhs is None
+            else "PASS" if lhs == rhs else "FAIL"
+        )
+        if verdict == "PASS":
+            reason = "입력툴의 시안색 가로 정지선과 로드뷰의 실제 정지선 존재 여부가 같습니다."
+        elif verdict == "FAIL":
+            reason = "입력툴의 시안색 가로 정지선과 로드뷰의 실제 정지선 존재 여부가 다릅니다."
+        else:
+            reason = (
+                "정지선 유무를 확정할 수 없습니다. 횡단보도는 정지선으로 취급하지 "
+                "않으며, 검수자가 실제 로드뷰를 추가 확인해야 합니다."
+            )
+    else:
+        verdict = None
     return {
         "status": status,
+        "verdict": verdict,
         "expected_value": lhs,
         "observed_value": rhs,
         "field": field, "label": FIELD_LABELS[field],
@@ -86,9 +103,12 @@ def _atomic_report(path: Path, report: dict) -> None:
 def analyze_stages(
     folder: Path, case_id: str, model_name: str,
     progress: Callable[[str], None], check_stop: Callable[[], None],
+    stop_line_threshold: float = .68,
 ) -> dict:
     """Run one SegFormer inference per captured roadview stage; no recapture."""
     check_stop()
+    if not .35 <= stop_line_threshold <= .95:
+        raise ValueError("로드뷰 정지선 threshold는 0.35~0.95 범위여야 합니다.")
     manifest = read_manifest(folder, case_id)
     available = [
         stage for stage in STAGES
@@ -137,7 +157,7 @@ def analyze_stages(
         # the six-number, future-comparable road-pixel score dataset.
         score_observation = score_road_mask(masks["road"])
         roadview_observed, road_overlay, evidence = extract_roadview_features(
-            road_image, stage, masks
+            road_image, stage, masks, stop_line_threshold=stop_line_threshold
         )
         compare = {
             key: compare_values(input_expected[key], roadview_observed[key], key)
@@ -167,6 +187,9 @@ def analyze_stages(
             "input_expected": input_expected,
             "roadview_observed": roadview_observed,
             "comparison": compare,
+            "stop_line_verdict": (
+                compare["stop_line"].get("verdict") if stage == "before" else None
+            ),
             "route_candidate": route,
             "roadview_semantic_evidence": evidence,
             "roadview_scores": score_observation["scores"],
@@ -197,6 +220,10 @@ def analyze_stages(
         "mismatch_stage_count": mismatch_count,
         "status": overall,
         "complete_capture": assessed == len(STAGES),
+        "stop_line_roadview_threshold": stop_line_threshold,
+        "stop_line_verdict": report["stages"].get("before", {}).get(
+            "stop_line_verdict", "REVIEW"
+        ) or "REVIEW",
         "warning": (
             "건물/도로 후보와 색상 선형은 픽셀 기반 추정입니다. "
             "차로 수·화살표·유도선 등 검증되지 않은 특징은 null로 보존합니다. "
