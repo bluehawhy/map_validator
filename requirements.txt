@@ -5,3 +5,5 @@ PyAutoGUI>=0.9.54,<1
 PyGetWindow>=0.0.9,<1
 PyYAML>=6,<7
 Pillow>=10,<12
+# Windows Graphics Capture for HD_3D Tool; never use PrintWindow on this app
+windows-capture>=2.0.1,<3
