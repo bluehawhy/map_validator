@@ -17,7 +17,9 @@ python -m pip install -r requirements-ai.txt
 python -m UI
 ```
 
-`python -m UI` 실행 시에는 PyQt6·pywinauto를 불러오기 전에 메인 스레드 COM 모드를 STA로 지정합니다. 이는 COM 모드 충돌 시 MTA에서 STA로 재시도하는 경고의 원인을 줄이며, 경고 메시지 자체를 숨기지는 않습니다. pywinauto 버전에 따라 명시된 COM 설정을 안내하는 별도 메시지는 나올 수 있습니다.\n\n또는 `UI\run_ui.bat`을 실행합니다. 실행할 때 `config.yaml`에 없는 항목만 `config.example.yaml`에서 추가하고, 기존에 들어 있는 항목과 값은 그대로 유지한 뒤 UI를 엽니다. `config.yaml`이 없으면 예제 설정으로 새로 만듭니다.
+`python -m UI` 실행 시에는 PyQt6·pywinauto를 불러오기 전에 메인 스레드 COM 모드를 STA로 지정합니다. 이는 COM 모드 충돌 시 MTA에서 STA로 재시도하는 경고의 원인을 줄이며, 경고 메시지 자체를 숨기지는 않습니다. pywinauto 버전에 따라 명시된 COM 설정을 안내하는 별도 메시지는 나올 수 있습니다.
+
+또는 `UI\run_ui.bat`을 실행합니다. 실행할 때 `config.yaml`에 없는 항목만 `config.example.yaml`에서 추가하고, 기존에 들어 있는 항목과 값은 그대로 유지한 뒤 UI를 엽니다. `config.yaml`이 없으면 예제 설정으로 새로 만듭니다.
 
 ## UI 항목과 작업
 
