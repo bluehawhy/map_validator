@@ -234,7 +234,7 @@ def set_zoom_value(window, value: int) -> None:
 
 def _intersection_number(value: str, kind: str) -> str | None:
     """Extract only a Polygon/Link identifier, not another number in the row."""
-    match = re.search(rf"\\b{kind}\\s*[:#-]?\\s*(\\d+)\\b", value, re.IGNORECASE)
+    match = re.search(rf"\b{kind}\s*[:#-]?\s*(\d+)\b", value, re.IGNORECASE)
     return match.group(1) if match else None
 
 
