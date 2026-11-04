@@ -14,6 +14,7 @@ from pathlib import Path
 import cv2
 from PyQt6.QtCore import QThread, pyqtSignal
 from map_validator.app_logging import log_exception_at_source
+from map_validator.com_threading import sta_com_apartment
 
 import logging
 
@@ -105,6 +106,15 @@ class ControlWorker(QThread):
         time.sleep(float(self.config.get("capture", {}).get("settle_seconds", 1.5)))
 
     def run(self) -> None:
+        try:
+            with sta_com_apartment():
+                self._run_job()
+        except Exception as exc:
+            log_exception_at_source(APP_LOG, "작업 스레드 초기화 실패", exc)
+            self._progress("오류 발생")
+            self.show_panel.emit()
+
+    def _run_job(self) -> None:
         try:
             if self.action == "analyze":
                 # UIA/Win32 tree inspection can block for seconds. Never run it
