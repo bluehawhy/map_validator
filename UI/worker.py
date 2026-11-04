@@ -32,7 +32,6 @@ from map_validator.windows import (
     find_window,
     move_roadview,
     scroll_to_bottom,
-    set_zoom_value,
 )
 
 
@@ -153,33 +152,26 @@ class ControlWorker(QThread):
                 self.result_ready.emit({"message": "로드뷰 버튼을 클릭했습니다."})
                 return
 
-            if self.open_first:
+            if self.open_first and self.action != "capture":
                 self._open_roadview()
             self._check_stop()
 
             if self.action == "capture":
-                # Keep Chrome in foreground for a direct HWND-capture check.
-                # Zoom/scroll would activate the work/roadview windows and
-                # prevent verifying genuine background capture.
-                self._progress("비활성 창 캡처 준비 (Zoom/스크롤 생략)")
+                # Snapshot is strictly read-only: no opening the view, zoom,
+                # scroll, W/S input, foreground activation, or geometry change.
+                self._progress("순수 스크린샷: 두 창을 현재 상태 그대로 캡처")
                 roadview = find_window(self.config["windows"]["roadview_title"])
             else:
                 prep = self.config.get("preparation", {})
-                self._progress("분석 화면 준비 중")
-                self._hide_before_desktop_action()
-                try:
-                    zoom_value = prep.get("input_zoom", 50)
-                    if zoom_value is not None:
-                        work = find_window(self.config["windows"]["work_title"])
-                        set_zoom_value(work, int(zoom_value))
-                        APP_LOG.info(f"입력 프로그램 zoom 설정: {int(zoom_value)}")
-
-                    roadview = find_window(self.config["windows"]["roadview_title"])
-                    if bool(prep.get("roadview_scroll_to_bottom", True)):
+                self._progress("분석 화면 준비 중 (입력도구 Zoom 조작 없음)")
+                roadview = find_window(self.config["windows"]["roadview_title"])
+                if bool(prep.get("roadview_scroll_to_bottom", True)):
+                    self._hide_before_desktop_action()
+                    try:
                         scroll_to_bottom(roadview)
                         APP_LOG.info("로드뷰를 맨 아래로 이동했습니다.")
-                finally:
-                    self.show_panel.emit()
+                    finally:
+                        self.show_panel.emit()
 
             work = find_window(self.config["windows"]["work_title"])
             cap = self.config.get("capture", {})
@@ -187,7 +179,10 @@ class ControlWorker(QThread):
             max_steps = int(movement_cfg.get("max_steps", 5))
             if not (0 <= self.steps <= max_steps):
                 raise ValueError(f"이동 횟수는 0~{max_steps}여야 합니다.")
-            count = self.steps if self.movement != "none" else 0
+            # '캡처만' never performs movement, regardless of UI selection.
+            count = 0 if self.action == "capture" else (
+                self.steps if self.movement != "none" else 0
+            )
             output = self._path(self.config.get("output", {}).get("directory", "results")) / self.case_id
             output.mkdir(parents=True, exist_ok=True)
             ai_cfg = self.config.get("analysis", {})
