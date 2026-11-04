@@ -28,7 +28,6 @@ analysis:
   vertical_range: [0.28, 0.60]
 
 ui:
-  last_case_id: "intersection_001"
   opacity: 0.92
 
 output:
