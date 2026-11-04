@@ -21,6 +21,8 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QScrollArea,
+    QFrame,
     QPushButton,
     QSlider,
     QTextEdit,
@@ -160,8 +162,8 @@ class MainWindow(QMainWindow):
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setMinimumSize(490, 740)
-        self.resize(520, 830)
+        self.setMinimumSize(485, 590)
+        self.resize(510, 740)
         opacity = float(self.cfg.get("ui", {}).get("opacity", 0.92))
         self.setWindowOpacity(max(0.35, min(opacity, 1.0)))
         outer = QWidget()
@@ -266,15 +268,30 @@ class MainWindow(QMainWindow):
         output_browse = QPushButton("찾기")
         output_browse.clicked.connect(self._select_output)
         self.output_input.editingFinished.connect(self._save_settings)
+        self.output_input.editingFinished.connect(self._refresh_stage_states)
         output_row.addWidget(self._label("저장 경로"))
         output_row.addWidget(self.output_input, 1)
         output_row.addWidget(output_browse)
         layout.addLayout(output_row)
 
+        # Keep stage controls accessible on smaller displays. Only the
+        # map_validator panel may resize; neither target application is touched.
+        steps_scroller = QScrollArea()
+        steps_scroller.setFrameShape(QFrame.Shape.NoFrame)
+        steps_scroller.setWidgetResizable(True)
+        steps_scroller.setObjectName("stageScroller")
+        content = QWidget()
+        content.setObjectName("content")
+        sections = QVBoxLayout(content)
+        sections.setContentsMargins(1, 0, 4, 0)
+        sections.setSpacing(6)
+        steps_scroller.setWidget(content)
+        layout.addWidget(steps_scroller, 2)
+
         from map_validator.stage_types import STAGES, STAGE_BUTTONS, STAGE_LABELS
 
-        layout.addWidget(self._label("1. 단계별 수동 촬영", "section"))
-        layout.addWidget(self._label(
+        sections.addWidget(self._label("1. 단계별 수동 촬영", "section"))
+        sections.addWidget(self._label(
             "※ 각 방향은 도로가 없어도 촬영하세요. 위치·시점은 직접 조정합니다.", "hint"
         ))
         self.stage_buttons = {}
@@ -294,7 +311,7 @@ class MainWindow(QMainWindow):
             status.setMinimumWidth(112)
             row.addWidget(button, 3)
             row.addWidget(status, 2)
-            layout.addLayout(row)
+            sections.addLayout(row)
             self.stage_buttons[stage] = button
             self.stage_status_labels[stage] = status
 
@@ -308,11 +325,11 @@ class MainWindow(QMainWindow):
         self.stop_btn.clicked.connect(self._stop)
         actions.addWidget(self.start_btn, 2)
         actions.addWidget(self.stop_btn, 1)
-        layout.addLayout(actions)
+        sections.addLayout(actions)
 
-        layout.addWidget(self._label("2. 항목별 비교 결과 (검수 보조)", "section"))
+        sections.addWidget(self._label("2. 항목별 비교 결과 (검수 보조)", "section"))
         self.geometry_result = self._label("분석 전 · 최종 사람 검수 필요", "decision")
-        layout.addWidget(self.geometry_result)
+        sections.addWidget(self.geometry_result)
         self.analysis_details = QTextEdit()
         self.analysis_details.setReadOnly(True)
         self.analysis_details.setMinimumHeight(115)
@@ -320,12 +337,12 @@ class MainWindow(QMainWindow):
             "진입 전: 정지선 / 차로 수 / 화살표 / 컬러유도선\n"
             "진입 후 좌·직·우: 도로 유무 / 차로 수 / 일반·컬러유도선"
         )
-        layout.addWidget(self.analysis_details, 1)
+        sections.addWidget(self.analysis_details, 1)
 
         layout.addWidget(self._label("작업 로그", "section"))
         self.logs = QTextEdit()
         self.logs.setReadOnly(True)
-        self.logs.setMinimumHeight(100)
+        self.logs.setMinimumHeight(78)
         layout.addWidget(self.logs, 1)
         self._log_relay = _UILogRelay(self)
         self._log_relay.line_ready.connect(self._append_log_line)
@@ -443,6 +460,7 @@ class MainWindow(QMainWindow):
                 self.output_input.setText(str(selected))
             # Folder-picker changes do not fire editingFinished on QLineEdit.
             self._save_settings()
+            self._refresh_stage_states()
 
     def _start_review_monitor(self) -> None:
         from .review_monitor import ReviewSelectionMonitor
@@ -464,6 +482,8 @@ class MainWindow(QMainWindow):
             return
         if review_id != self.case_input.text().strip():
             self.case_input.setText(review_id)
+            self.geometry_result.setText("새 검수 ID · 촬영/분석 전")
+            self.analysis_details.clear()
             self._log(f"검수 ID 자동 업데이트: {review_id}")
 
     def _on_review_monitor_finished(self) -> None:
