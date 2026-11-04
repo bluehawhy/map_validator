@@ -233,7 +233,7 @@ def set_zoom_value(window, value: int) -> None:
     raise RuntimeError(f"zoom could not reach {requested}; last value was {current}")
 
 def read_selected_intersection_id(title_keyword: str) -> str:
-    """Return '<polygon id>-<link id>' from the selected review-tree item."""
+    """Return 'Polygon <id>- Link <id>' from the selected review-tree item."""
     from pywinauto import Desktop
 
     configured_key = _comparable_title(title_keyword)
@@ -311,5 +311,5 @@ def read_selected_intersection_id(title_keyword: str) -> str:
     if polygon_id is None:
         raise RuntimeError("Parent Polygon ID could not be read for the selected Link")
 
-    return f"{polygon_id}-{link_id}"
+    return f"Polygon {polygon_id}- Link {link_id}"
 
