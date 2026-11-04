@@ -174,12 +174,18 @@ def analyze_saved_images(
     comparison_statuses = [
         frame["geometry_comparison"]["status"] for frame in frames
     ]
-    if "geometry_consistent_candidate" in comparison_statuses:
-        overall_comparison = "geometry_consistent_candidate"
-    elif "direction_consistent_candidate" in comparison_statuses:
-        overall_comparison = "direction_consistent_candidate"
-    elif "possible_mismatch_review" in comparison_statuses:
+    evidence = set(comparison_statuses)
+    consistent = {
+        "geometry_consistent_candidate", "direction_consistent_candidate"
+    }
+    if "possible_mismatch_review" in evidence and evidence.intersection(consistent):
+        overall_comparison = "mixed_evidence_review"
+    elif "possible_mismatch_review" in evidence:
         overall_comparison = "possible_mismatch_review"
+    elif "geometry_consistent_candidate" in evidence:
+        overall_comparison = "geometry_consistent_candidate"
+    elif "direction_consistent_candidate" in evidence:
+        overall_comparison = "direction_consistent_candidate"
     else:
         overall_comparison = "insufficient_evidence"
 
