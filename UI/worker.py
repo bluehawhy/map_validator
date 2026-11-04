@@ -148,22 +148,29 @@ class ControlWorker(QThread):
                 self._open_roadview()
             self._check_stop()
 
-            prep = self.config.get("preparation", {})
-            self._progress("분석 화면 준비 중")
-            self._hide_before_desktop_action()
-            try:
-                zoom_value = prep.get("input_zoom", 50)
-                if zoom_value is not None:
-                    work = find_window(self.config["windows"]["work_title"])
-                    set_zoom_value(work, int(zoom_value))
-                    APP_LOG.info(f"입력 프로그램 zoom 설정: {int(zoom_value)}")
-
+            if self.action == "capture":
+                # Keep Chrome in foreground for a direct HWND-capture check.
+                # Zoom/scroll would activate the work/roadview windows and
+                # prevent verifying genuine background capture.
+                self._progress("비활성 창 캡처 준비 (Zoom/스크롤 생략)")
                 roadview = find_window(self.config["windows"]["roadview_title"])
-                if bool(prep.get("roadview_scroll_to_bottom", True)):
-                    scroll_to_bottom(roadview)
-                    APP_LOG.info("로드뷰를 맨 아래로 이동했습니다.")
-            finally:
-                self.show_panel.emit()
+            else:
+                prep = self.config.get("preparation", {})
+                self._progress("분석 화면 준비 중")
+                self._hide_before_desktop_action()
+                try:
+                    zoom_value = prep.get("input_zoom", 50)
+                    if zoom_value is not None:
+                        work = find_window(self.config["windows"]["work_title"])
+                        set_zoom_value(work, int(zoom_value))
+                        APP_LOG.info(f"입력 프로그램 zoom 설정: {int(zoom_value)}")
+
+                    roadview = find_window(self.config["windows"]["roadview_title"])
+                    if bool(prep.get("roadview_scroll_to_bottom", True)):
+                        scroll_to_bottom(roadview)
+                        APP_LOG.info("로드뷰를 맨 아래로 이동했습니다.")
+                finally:
+                    self.show_panel.emit()
 
             cap = self.config.get("capture", {})
             movement_cfg = self.config["movement"]
@@ -185,18 +192,20 @@ class ControlWorker(QThread):
             for idx in range(count + 1):
                 self._check_stop()
                 self._progress(f"로드뷰 캡처 {idx + 1}/{count + 1}")
-                self._hide_before_desktop_action()
-                try:
-                    if idx > 0:
+                if idx > 0:
+                    # W/S input still needs the foreground window. Only the
+                    # screenshot itself is fully non-activating.
+                    self._hide_before_desktop_action()
+                    try:
                         key = (movement_cfg["forward_key"] if self.movement == "forward"
                                else movement_cfg["backward_key"])
                         move_roadview(
                             roadview, key, float(movement_cfg.get("hold_seconds", 0.5))
                         )
                         time.sleep(float(cap.get("settle_seconds", 1.5)))
-                    frame = capture_window(roadview, cap.get("region"))
-                finally:
-                    self.show_panel.emit()
+                    finally:
+                        self.show_panel.emit()
+                frame = capture_window(roadview, cap.get("region"))
                 image_path = output / f"frame_{idx:02d}.png"
                 if not cv2.imwrite(str(image_path), frame):
                     raise RuntimeError(f"스크린샷 저장 실패: {image_path}")
