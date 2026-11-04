@@ -13,7 +13,6 @@ import yaml
 
 from .road_analysis import RoadSegmenter, analyze_road_mask, draw_review_overlay
 from .capture_naming import capture_file_name
-from .work_capture import capture_work_window
 
 
 def arguments() -> argparse.Namespace:
@@ -71,8 +70,8 @@ def main() -> int:
         )
         if not cv2.imwrite(str(roadview_path), img):
             raise RuntimeError(f"로드뷰 스크린샷 저장 실패: {roadview_path}")
-        # HD_3D Tool must never receive PrintWindow's repaint request.
-        work_img = capture_work_window(work)
+        # Both windows use the same background Windows Graphics Capture.
+        work_img = capture_window(work)
         work_path = output / capture_file_name(
             args.case_id, windows_cfg["work_title"], idx, step_count + 1,
         )
