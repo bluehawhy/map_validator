@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -311,24 +312,51 @@ class MainWindow(QMainWindow):
         layout.addLayout(footer)
         self._log("준비 완료. 캡처 전에 로드뷰 창 제목을 확인하세요.")
 
+    @staticmethod
+    def _program_title(window_title: str) -> str:
+        """Remove per-workspace suffixes while keeping a stable program title."""
+        title = window_title.strip()
+        if " - " in title:
+            title = title.split(" - ", 1)[0].strip()
+        return title
+
     def _activate_configured_window(self, field: QLineEdit, label: str) -> None:
         try:
             import pygetwindow as gw
 
-            title = field.text().strip()
-            if not title:
-                raise ValueError(f"{label} 창 제목을 먼저 입력하세요.")
-
+            current = field.text().strip()
             windows = [
                 window for window in gw.getAllWindows()
-                if title.casefold() in window.title.casefold()
+                if window.title.strip()
+                and window.title.strip() != self.windowTitle()
                 and window.width > 150
                 and window.height > 150
             ]
             if not windows:
-                raise RuntimeError(f"실행 중인 {label} 창을 찾지 못했습니다: {title}")
+                raise RuntimeError("선택할 수 있는 실행 중인 창이 없습니다.")
 
-            target = windows[0]
+            choices: dict[str, object] = {}
+            for window in windows:
+                program_title = self._program_title(window.title)
+                if program_title and program_title not in choices:
+                    choices[program_title] = window
+
+            titles = sorted(choices, key=str.casefold)
+            current_program = self._program_title(current)
+            current_index = titles.index(current_program) if current_program in titles else 0
+            selected, accepted = QInputDialog.getItem(
+                self,
+                f"{label} 선택",
+                "실행 중인 프로그램:",
+                titles,
+                current_index,
+                False,
+            )
+            if not accepted or not selected:
+                return
+
+            target = choices[selected]
+            field.setText(selected)
             self._save_settings()
             if target.isMinimized:
                 target.restore()
