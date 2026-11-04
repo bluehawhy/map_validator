@@ -1,6 +1,6 @@
 """Update the review ID only after left clicks in the review window.
 
-A native low-level mouse hook detects the user's click without repeatedly
+A foreground event registers a low-level mouse hook only for the review window.\nThe hook detects the user's click without repeatedly
 querying Windows UI Automation. The hook callback only queues a notification;
 a separate reader thread checks the Polygon/Link selection 200 ms later so
 neither the Qt event loop nor the global mouse hook blocks on UIA.
@@ -210,19 +210,62 @@ class ReviewSelectionMonitor(QThread):
                     pass
             return user32.CallNextHookEx(None, code, message, data)
 
-        callback = hook_type(on_mouse)
-        handle = user32.SetWindowsHookExW(
-            WH_MOUSE_LL, callback, kernel32.GetModuleHandleW(None), 0
+        event_type = ctypes.WINFUNCTYPE(
+            None, ctypes.c_void_p, wintypes.DWORD, wintypes.HWND,
+            wintypes.LONG, wintypes.LONG, wintypes.DWORD, wintypes.DWORD,
         )
-        if not handle:
-            error = ctypes.get_last_error()
-            raise OSError(error, "Windows 마우스 클릭 후크 등록 실패")
+        user32.SetWinEventHook.argtypes = [
+            wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, event_type,
+            wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+        ]
+        user32.SetWinEventHook.restype = ctypes.c_void_p
+        user32.UnhookWinEvent.argtypes = [ctypes.c_void_p]
+        user32.UnhookWinEvent.restype = wintypes.BOOL
 
-        APP_LOG.info(
-            "검수 ID 클릭 감시 시작: '%s' 창에서 왼쪽 클릭 후 조회",
-            self.review_title,
+        mouse_callback = hook_type(on_mouse)
+        mouse_handle = None
+
+        def sync_foreground() -> None:
+            nonlocal mouse_handle
+            foreground = user32.GetForegroundWindow()
+            title_buffer = ctypes.create_unicode_buffer(256)
+            matches = bool(
+                foreground
+                and user32.GetWindowTextW(foreground, title_buffer, len(title_buffer))
+                and self._title_key in _comparable_title(title_buffer.value)
+            )
+            if matches and mouse_handle is None:
+                mouse_handle = user32.SetWindowsHookExW(
+                    WH_MOUSE_LL, mouse_callback, kernel32.GetModuleHandleW(None), 0
+                )
+                if not mouse_handle:
+                    raise OSError(ctypes.get_last_error(), "마우스 후크 등록 실패")
+                APP_LOG.info("교차로 검수창 활성 · 마우스 후크 등록")
+                # The activating click may precede hook registration.
+                self._schedule_read()
+            elif not matches and mouse_handle is not None:
+                if not user32.UnhookWindowsHookEx(mouse_handle):
+                    raise OSError(ctypes.get_last_error(), "마우스 후크 해제 실패")
+                mouse_handle = None
+                APP_LOG.info("교차로 검수창 비활성 · 마우스 후크 해제 완료")
+
+        def on_foreground(event_hook, event, hwnd, object_id, child_id, thread_id, event_time):
+            try:
+                sync_foreground()
+            except Exception:
+                # Exceptions must not cross the WinEvent callback boundary.
+                APP_LOG.exception("활성 창 변경에 따른 마우스 후크 전환 실패")
+
+        event_callback = event_type(on_foreground)
+        event_handle = user32.SetWinEventHook(
+            0x0003, 0x0003, None, event_callback, 0, 0, 0
         )
+        if not event_handle:
+            raise OSError(ctypes.get_last_error(), "활성 창 변경 감시 등록 실패")
+
+        APP_LOG.info("검수 ID 활성 창 감시 시작: '%s'", self.review_title)
         try:
+            sync_foreground()
             message = wintypes.MSG()
             while not self.isInterruptionRequested():
                 while user32.PeekMessageW(
@@ -234,8 +277,11 @@ class ReviewSelectionMonitor(QThread):
                     user32.DispatchMessageW(ctypes.byref(message))
                 self.msleep(20)
         finally:
-            if user32.UnhookWindowsHookEx(handle):
-                APP_LOG.info("검수 ID 마우스 후크 해제 완료")
-            else:
-                APP_LOG.error("검수 ID 마우스 후크 해제 실패 · 오류 코드 %s", ctypes.get_last_error())
+            if mouse_handle is not None:
+                if user32.UnhookWindowsHookEx(mouse_handle):
+                    APP_LOG.info("검수 ID 마우스 후크 해제 완료")
+                else:
+                    APP_LOG.error("검수 ID 마우스 후크 해제 실패 · 오류 코드 %s", ctypes.get_last_error())
+            if not user32.UnhookWinEvent(event_handle):
+                APP_LOG.error("활성 창 감시 해제 실패 · 오류 코드 %s", ctypes.get_last_error())
             APP_LOG.info("검수 ID 클릭 감시 종료")
