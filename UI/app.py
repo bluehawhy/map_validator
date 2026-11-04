@@ -731,15 +731,15 @@ class MainWindow(QMainWindow):
                     confidence = expected.get("confidence")
                     score = "—" if confidence is None else f"{confidence:.2f}"
                     input_items.append(f"{label} {value} (후보 점수 {score})")
-                    route = stage_item.get("route_candidate", {})
-                    angle = route.get("turn_angle_deg")
-                    if route.get("status") == "candidate" and angle is not None:
-                        geometry = f"{angle:.1f}° 후보"
-                    else:
-                        geometry = "판독 보류"
-                    geometry_items.append(f"{label} {geometry} / 코드 판독 불가")
+                    comparison = stage_item.get("comparison", {}).get("road_exists", {})
+                    verdict = {
+                        "match_candidate": "P",
+                        "mismatch_review": "F",
+                    }.get(comparison.get("status"), "N")
+                    geometry_items.append(f"{label} {verdict}")
                 lines.append("입력툴: " + "  |  ".join(input_items))
                 lines.append("도로 선형: " + "  |  ".join(geometry_items))
+                lines.append("※ P: 일치 후보 / F: 불일치 의심 / N: 판단 보류 · 최종 확인 필요")
                 lines.append("※ 입력툴 점수는 색상 경로 후보의 고정 휴리스틱 점수이며 확률이 아닙니다.")
                 lines.extend([
                     "[도로 영역 스코어 · 0~1, 높을수록 ROI 내 도로 픽셀 많음]",
