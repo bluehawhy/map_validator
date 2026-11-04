@@ -132,16 +132,16 @@ def detect_roadview_stop_line(
     for x1c, y1c, x2c, y2c in segments:
         middle_y = (y1c + y2c) / 2
         length = abs(x2c - x1c)
-        # Compare groups of *separate* horizontal marks, not duplicate Hough
-        # fragments from one thick line (separation >= 7 px).
+        # Compare *distinct stripes*, not parallel edges/fragments from the
+        # same thick stripe. Repeated separated lines suggest a crosswalk.
         neighbor_positions = sorted(
             (q1 + q3) / 2 for q0, q1, q2, q3 in lines_of_paint
             if abs((q1 + q3) / 2 - middle_y) < max(32, h * .105)
-            and abs((q1 + q3) / 2 - middle_y) >= 7
+            and abs((q1 + q3) / 2 - middle_y) >= max(10, h * .02)
         )
         separate_bands = []
         for position in neighbor_positions:
-            if not separate_bands or position - separate_bands[-1] >= max(7, h * .012):
+            if not separate_bands or position - separate_bands[-1] >= max(11, h * .024):
                 separate_bands.append(position)
         if len(separate_bands) >= 2:
             rejected_crosswalk += 1
@@ -160,7 +160,7 @@ def detect_roadview_stop_line(
         if context_score < .52:
             continue
         confidence = min(
-            .94, .48 + .75 * min(length / max(w, 1), .48)
+            .98, .48 + .75 * min(length / max(w, 1), .48)
             + .13 * context_score
         )
         candidates.append((confidence, (left_x, y1c + y0), (right_x, y2c + y0)))
