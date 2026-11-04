@@ -7,7 +7,7 @@ windows:
   open_button_image: "assets/open_roadview.png"
 
 preparation:
-  input_zoom: 50
+  # 분석 작업에서만 로드뷰 스크롤 사용. 입력도구 Zoom 자동 조작은 하지 않음.
   roadview_scroll_to_bottom: true
 
 capture:
