@@ -15,14 +15,42 @@ pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.15
 
 
+def _program_title(window_title: str) -> str:
+    title = window_title.strip()
+    if " - " in title:
+        title = title.split(" - ", 1)[0].strip()
+    return title
+
+
+def _comparable_title(value: str) -> str:
+    return re.sub(r"[^0-9a-z가-힣]+", "", value.casefold())
+
+
 def find_window(title_keyword: str):
-    if not title_keyword.strip():
+    configured = _program_title(title_keyword)
+    if not configured:
         raise ValueError("Window title keyword cannot be empty")
-    windows = [w for w in gw.getAllWindows() if title_keyword.casefold() in w.title.casefold()]
-    windows = [w for w in windows if w.width > 150 and w.height > 150]
-    if not windows:
-        raise RuntimeError(f"Window not found: {title_keyword!r}")
-    return windows[0]
+
+    configured_key = _comparable_title(configured)
+    windows = [window for window in gw.getAllWindows() if window.title.strip()]
+    matches = [
+        window for window in windows
+        if configured.casefold() in window.title.casefold()
+        or configured_key == _comparable_title(_program_title(window.title))
+        or configured_key in _comparable_title(window.title)
+    ]
+    if not matches:
+        detected = ", ".join(window.title.strip() for window in windows[:8])
+        detail = f"; detected windows: {detected}" if detected else "; no windows detected"
+        raise RuntimeError(f"Window not found: {configured!r}{detail}")
+
+    return next(
+        (
+            window for window in matches
+            if window.width > 150 and window.height > 150
+        ),
+        matches[0],
+    )
 
 
 def activate(window) -> None:
