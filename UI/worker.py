@@ -13,6 +13,11 @@ from pathlib import Path
 
 import cv2
 from PyQt6.QtCore import QThread, pyqtSignal
+from map_validator.app_logging import log_exception_at_source
+
+import logging
+
+APP_LOG = logging.getLogger("map_validator.ui.worker")
 
 from map_validator.road_analysis import (
     RoadSegmenter,
@@ -30,7 +35,6 @@ from map_validator.windows import (
 
 
 class ControlWorker(QThread):
-    message = pyqtSignal(str)
     progress = pyqtSignal(str)
     result_ready = pyqtSignal(dict)
     hide_panel = pyqtSignal()
@@ -58,6 +62,10 @@ class ControlWorker(QThread):
         self._stop = threading.Event()
         self._hidden = threading.Event()
 
+    def _progress(self, description: str) -> None:
+        self.progress.emit(description)
+        APP_LOG.info(description, stacklevel=2)
+
     def request_stop(self) -> None:
         self._stop.set()
 
@@ -83,7 +91,7 @@ class ControlWorker(QThread):
         return p if p.is_absolute() else self.config_dir / p
 
     def _open_roadview(self) -> None:
-        self.progress.emit("업무 프로그램에서 로드뷰 열기")
+        self._progress("업무 프로그램에서 로드뷰 열기")
         work = find_window(self.config["windows"]["work_title"])
         template_path = self._path(self.config["windows"]["open_button_image"])
         self._hide_before_desktop_action()
@@ -92,7 +100,7 @@ class ControlWorker(QThread):
                 raise RuntimeError("로드뷰 버튼 이미지가 발견되지 않아 클릭하지 않았습니다.")
         finally:
             self.show_panel.emit()
-        self.message.emit("로드뷰 버튼 클릭 완료")
+        APP_LOG.info("로드뷰 버튼 클릭 완료")
         time.sleep(float(self.config.get("capture", {}).get("settle_seconds", 1.5)))
 
     def run(self) -> None:
@@ -113,19 +121,19 @@ class ControlWorker(QThread):
             self._check_stop()
 
             prep = self.config.get("preparation", {})
-            self.progress.emit("분석 화면 준비 중")
+            self._progress("분석 화면 준비 중")
             self._hide_before_desktop_action()
             try:
                 zoom_value = prep.get("input_zoom", 50)
                 if zoom_value is not None:
                     work = find_window(self.config["windows"]["work_title"])
                     set_zoom_value(work, int(zoom_value))
-                    self.message.emit(f"입력 프로그램 zoom 설정: {int(zoom_value)}")
+                    APP_LOG.info(f"입력 프로그램 zoom 설정: {int(zoom_value)}")
 
                 roadview = find_window(self.config["windows"]["roadview_title"])
                 if bool(prep.get("roadview_scroll_to_bottom", True)):
                     scroll_to_bottom(roadview)
-                    self.message.emit("로드뷰를 맨 아래로 이동했습니다.")
+                    APP_LOG.info("로드뷰를 맨 아래로 이동했습니다.")
             finally:
                 self.show_panel.emit()
 
@@ -140,15 +148,15 @@ class ControlWorker(QThread):
             ai_cfg = self.config.get("analysis", {})
             segmenter = None
             if self.action == "analyze":
-                self.progress.emit("AI 모델 준비 중")
-                self.message.emit("AI 모델 최초 실행은 다운로드가 필요할 수 있습니다.")
+                self._progress("AI 모델 준비 중")
+                APP_LOG.info("AI 모델 최초 실행은 다운로드가 필요할 수 있습니다.")
                 segmenter = RoadSegmenter(
                     ai_cfg.get("model_name", "nvidia/segformer-b0-finetuned-ade-512-512")
                 )
             frames = []
             for idx in range(count + 1):
                 self._check_stop()
-                self.progress.emit(f"로드뷰 캡처 {idx + 1}/{count + 1}")
+                self._progress(f"로드뷰 캡처 {idx + 1}/{count + 1}")
                 self._hide_before_desktop_action()
                 try:
                     if idx > 0:
@@ -171,7 +179,7 @@ class ControlWorker(QThread):
                     "right_candidate": None,
                 }
                 if segmenter is not None:
-                    self.progress.emit(f"AI 분석 {idx + 1}/{count + 1}")
+                    self._progress(f"AI 분석 {idx + 1}/{count + 1}")
                     self._check_stop()
                     mask = segmenter.mask(frame)
                     vertical_range = tuple(ai_cfg.get("vertical_range", [0.28, 0.60]))
@@ -187,7 +195,7 @@ class ControlWorker(QThread):
                     entry.update(direction.as_dict())
                     entry["overlay"] = overlay_path.name
                 frames.append(entry)
-                self.message.emit(f"{idx + 1}번째 화면 저장: {image_path.name}")
+                APP_LOG.info(f"{idx + 1}번째 화면 저장: {image_path.name}")
 
             def summary(direction: str) -> str:
                 if segmenter is None:
@@ -211,7 +219,7 @@ class ControlWorker(QThread):
             (output / "result.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-            self.progress.emit("검수 자료 저장 완료")
+            self._progress("검수 자료 저장 완료")
             self.result_ready.emit({
                 "left": report["left_road"],
                 "right": report["right_road"],
@@ -219,10 +227,10 @@ class ControlWorker(QThread):
                 "frames": len(frames),
             })
         except InterruptedError as exc:
-            self.message.emit(str(exc))
-            self.progress.emit("중지됨")
+            APP_LOG.warning("작업 중단: %s", exc)
+            self._progress("중지됨")
         except Exception as exc:
-            self.message.emit(f"오류: {exc}")
-            self.progress.emit("오류 발생")
+            log_exception_at_source(APP_LOG, "작업 오류", exc)
+            self._progress("오류 발생")
         finally:
             self.show_panel.emit()
