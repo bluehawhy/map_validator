@@ -685,7 +685,36 @@ class MainWindow(QMainWindow):
                 "insufficient_evidence": "판단 보류",
                 "not_applicable": "해당 없음",
             }
+            road_scores = result.get("road_scores", {})
+            before_scores = road_scores.get("before", {})
+            after_scores = road_scores.get("after", {})
+            differences = road_scores.get("delta_after_minus_before", {})
+
+            def display_score(value) -> str:
+                return "—" if value is None else f"{value:.4f}"
+
             lines = []
+            if road_scores:
+                lines.extend([
+                    "[도로 영역 스코어 · 0~1, 높을수록 ROI 내 도로 픽셀 많음]",
+                    "진입 전 : 좌 {0}  |  직 {1}  |  우 {2}".format(
+                        display_score(before_scores.get("left")),
+                        display_score(before_scores.get("straight")),
+                        display_score(before_scores.get("right")),
+                    ),
+                    "진입 후 : 좌→정면 {0}  |  직→정면 {1}  |  우→정면 {2}".format(
+                        display_score(after_scores.get("left", {}).get("straight_score")),
+                        display_score(after_scores.get("straight", {}).get("straight_score")),
+                        display_score(after_scores.get("right", {}).get("straight_score")),
+                    ),
+                    "차이(후-전): 좌 {0}  |  직 {1}  |  우 {2}".format(
+                        display_score(differences.get("left")),
+                        display_score(differences.get("straight")),
+                        display_score(differences.get("right")),
+                    ),
+                    "※ 촬영 시점이 달라 스코어 차이만으로 불일치를 확정하지 않습니다.",
+                    "",
+                ])
             for stage in STAGES:
                 item = result["stages"][stage]
                 lines.append(f"[{STAGE_LABELS[stage]}]")
@@ -709,6 +738,13 @@ class MainWindow(QMainWindow):
                 f"{status_label}"
             )
             self._log(f"분석 결과: {Path(self.latest_folder) / 'staged_analysis.json'}")
+            if result.get("score_files"):
+                self._log(
+                    "교차로 점수: {0}/6개 기록 · 통합 CSV: {1}".format(
+                        road_scores.get("available_scores", 0),
+                        result["score_files"]["all_cases_csv"],
+                    )
+                )
         else:
             self._log(f"미지원 결과 형식: {kind}")
         self._log(f"결과 폴더: {self.latest_folder}")
