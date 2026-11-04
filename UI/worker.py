@@ -100,9 +100,7 @@ class ControlWorker(QThread):
 
     def _run_job(self) -> None:
         try:
-            if self.action == "analyze" or (
-                self.action == "capture" and not self.case_id.strip()
-            ):
+            if not self.case_id.strip():
                 # UIA/Win32 inspection is always performed on the worker
                 # thread; an empty capture ID must never block the GUI.
                 self._progress("선택 교차로 검수 ID 확인 중")
@@ -132,6 +130,26 @@ class ControlWorker(QThread):
             if self.movement not in {"none", "forward", "backward"}:
                 raise ValueError("지원하지 않는 로드뷰 이동입니다.")
             self._check_stop()
+
+            if self.action == "analyze":
+                # Only read previously captured photos. Never launch WGC,
+                # activate work apps, scroll the roadview, or take new images.
+                from map_validator.saved_analysis import analyze_saved_images
+
+                folder = (
+                    self._path(self.config.get("output", {}).get("directory", "results"))
+                    / self.case_id
+                )
+                result = analyze_saved_images(
+                    output=folder,
+                    case_id=self.case_id,
+                    roadview_title=self.config["windows"]["roadview_title"],
+                    analysis_settings=self.config.get("analysis", {}),
+                    progress=self._progress,
+                    check_stop=self._check_stop,
+                )
+                self.result_ready.emit(result)
+                return
 
             if self.action == "capture":
                 # Snapshot is strictly read-only: no opening the view, zoom,
