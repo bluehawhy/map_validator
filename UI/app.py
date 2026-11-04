@@ -497,49 +497,90 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             log_exception_at_source(APP_LOG, "설정 저장 실패", exc)
 
+    def _case_folder(self) -> Path | None:
+        case_id = self.case_input.text().strip()
+        if not case_id:
+            return None
+        from map_validator.stage_types import validate_case_id
+
+        try:
+            validate_case_id(case_id)
+        except ValueError:
+            return None
+        configured = Path(self.output_input.text().strip() or "results").expanduser()
+        base = configured if configured.is_absolute() else ROOT / configured
+        return base / case_id
+
+    def _refresh_stage_states(self, _text: str = "") -> None:
+        from map_validator.stage_types import STAGES
+        from map_validator.staged_capture import read_manifest, stage_status
+
+        folder = self._case_folder()
+        states = {
+            "not_captured": "미촬영",
+            "partial_capture": "일부 누락",
+            "captured": "촬영 완료",
+        }
+        for stage in STAGES:
+            label = self.stage_status_labels.get(stage)
+            if label is not None:
+                label.setText("미촬영")
+        if folder is None:
+            return
+        try:
+            manifest = read_manifest(folder, self.case_input.text().strip())
+            for stage in STAGES:
+                record = manifest["stages"][stage]
+                current = stage_status(folder, record)
+                revision = record.get("revision", 0)
+                suffix = f" · {revision}회" if current == "captured" else ""
+                self.stage_status_labels[stage].setText(
+                    states.get(current, "확인 필요") + suffix
+                )
+            if folder.is_dir():
+                self.latest_folder = str(folder)
+                self.folder_btn.setEnabled(True)
+            else:
+                self.latest_folder = None
+                self.folder_btn.setEnabled(False)
+        except Exception as exc:
+            log_exception_at_source(APP_LOG, "검수 단계 상태 읽기 실패", exc)
+
     def _start(self, action: str) -> None:
         if self.worker is not None and self.worker.isRunning():
             return
         try:
-            cfg = self._current_settings()
-            if action not in {"capture", "analyze"}:
+            from map_validator.stage_types import STAGES
+
+            valid = {"analyze_staged"} | {"capture_" + stage for stage in STAGES}
+            if action not in valid:
                 raise ValueError(f"지원하지 않는 작업입니다: {action}")
+            cfg = self._current_settings()
             case_id = self.case_input.text().strip()
             if not case_id and not cfg["windows"].get(
                 "intersection_review_title", ""
             ).strip():
                 raise ValueError(
-                    "검수 ID가 없습니다. 교차로 선형 검수 창을 선택하거나 "
-                    "config.yaml에 입력 교차로 타이틀을 설정하세요."
+                    "검수 ID가 없습니다. 교차로 선형 검수에서 Polygon/Link를 선택하세요."
                 )
-            # Read a missing ID on the worker, without blocking the GUI.
-            # A populated ID always refers to the screenshots to analyze.
-            if not cfg["windows"]["roadview_title"].strip():
-                raise ValueError("로드뷰 창 제목을 입력하세요.")
-            if not cfg["windows"]["work_title"].strip():
-                raise ValueError("업무 창 제목을 입력하세요.")
+            if action != "analyze_staged":
+                if not cfg["windows"]["roadview_title"].strip():
+                    raise ValueError("로드뷰 창 제목을 입력하세요.")
+                if not cfg["windows"]["work_title"].strip():
+                    raise ValueError("업무 창 제목을 입력하세요.")
             self.cfg = cfg
             from .worker import ControlWorker
 
             self.worker = ControlWorker(
-                config=cfg,
-                config_dir=ROOT,
-                case_id=case_id,
-                action=action,
-                movement=self.move_combo.currentData(),
-                steps=self.step_spin.value(),
-                parent=self,
+                config=cfg, config_dir=ROOT, case_id=case_id,
+                action=action, parent=self,
             )
             self.worker.progress.connect(self.status_label.setText)
             self.worker.case_id_ready.connect(self._on_analysis_case_id)
             self.worker.result_ready.connect(self._show_result)
-            self.worker.hide_panel.connect(self._hide_for_capture)
             self.worker.show_panel.connect(self._restore_panel)
             self.worker.finished.connect(self._done)
             self._busy(True)
-            self.left_result.setText("좌측: 분석 전")
-            self.right_result.setText("우측: 분석 전")
-            self.geometry_result.setText("선형 대조: 분석 전")
             self.status_label.setText("진행 중")
             self._log(f"시작: {action} / {case_id or '교차로 선택값 조회 중'}")
             self.worker.start()
@@ -548,20 +589,15 @@ class MainWindow(QMainWindow):
 
     def _busy(self, busy: bool) -> None:
         for widget in (
-            self.capture_btn, self.start_btn, self.save_btn,
+            *self.stage_buttons.values(), self.start_btn, self.save_btn,
             self.case_input, self.work_input, self.view_input,
-            self.work_select_btn, self.view_select_btn, self.window_info_btn, self.output_input,
-            self.move_combo, self.step_spin,
+            self.work_select_btn, self.view_select_btn, self.window_info_btn,
+            self.output_input,
         ):
             widget.setEnabled(not busy)
         self.stop_btn.setEnabled(busy)
         if self.review_monitor is not None:
             self.review_monitor.set_paused(busy)
-
-    def _hide_for_capture(self) -> None:
-        self.hide()
-        if self.worker is not None:
-            self.worker.acknowledge_hidden()
 
     def _restore_panel(self) -> None:
         if not self.isVisible():
@@ -570,43 +606,82 @@ class MainWindow(QMainWindow):
     def _stop(self) -> None:
         if self.worker is not None and self.worker.isRunning():
             self.worker.request_stop()
-            self._log("중지 요청: 현재 캡처 또는 AI 처리 단위 종료 후 중단됩니다.")
+            self._log("중지 요청: 현재 WGC 캡처 또는 AI 추론 단위 후 중단됩니다.")
             self.status_label.setText("중지 요청됨")
 
-    def _result_text(self, code: str) -> str:
-        return {
-            "possible": "도로 후보 감지 (검토)",
-            "not_detected_review_required": "후보 미감지 (검토)",
-            "not_analyzed": "미분석",
-        }.get(code, "확인 필요")
+    @staticmethod
+    def _format_feature(value) -> str:
+        if value is None:
+            return "판단 보류"
+        if isinstance(value, bool):
+            return "있음" if value else "없음"
+        if isinstance(value, list):
+            return ", ".join(str(v) for v in value)
+        return str(value)
 
     def _show_result(self, result: dict) -> None:
         if "folder" not in result:
             self._log(result.get("message", "완료"))
             return
-        self.left_result.setText("좌측: " + self._result_text(result["left"]))
-        self.right_result.setText("우측: " + self._result_text(result["right"]))
         self.latest_folder = result["folder"]
         self.folder_btn.setEnabled(True)
-        if result.get("kind") == "analysis":
-            comparison = result.get(
-                "geometry_comparison_status", "insufficient_evidence"
+        kind = result.get("kind")
+        if kind == "staged_capture":
+            from map_validator.stage_types import STAGE_LABELS
+
+            stage = result["stage"]
+            self._log(
+                f"{STAGE_LABELS[stage]} 입력툴·로드뷰 촬영 완료 "
+                f"(버전 {result['revision']})"
             )
-            comparison_label = {
-                "geometry_consistent_candidate": "방향·형태 일치 후보 (검수 필요)",
-                "direction_consistent_candidate": "방향 일치 후보 (추가 확인)",
-                "possible_mismatch_review": "불일치 의심 (검수 필요)",
-                "mixed_evidence_review": "사진 간 판정 상충 (검수 필요)",
-                "insufficient_evidence": "판단 보류 (증거 부족)",
-            }.get(comparison, "판단 보류 (확인 필요)")
-            self.geometry_result.setText("선형 대조: " + comparison_label)
-            self._log(f"기존 스크린샷 {result['frames']}장 도로후보 분석 완료")
-            self._log(f"입력툴 선형 ↔ 로드뷰 대조: {comparison_label}")
-            self.status_label.setText("저장된 사진 선형 대조 완료")
-            self._log(f"분석 결과: {Path(self.latest_folder) / 'analysis.json'}")
+            self.status_label.setText("단계 촬영 완료")
+            self.geometry_result.setText("사진 변경됨 · 촬영본 분석을 다시 실행하세요")
+            self.analysis_details.clear()
+            self._refresh_stage_states()
+        elif kind == "staged_analysis":
+            from map_validator.stage_types import STAGES, STAGE_LABELS, FIELD_LABELS
+
+            summary = result["summary"]
+            status_label = {
+                "mismatch_review": "불일치 의심 · 직접 확인 필요",
+                "partial_evidence_review": "일부 일치 후보 · 판단 보류 포함",
+                "insufficient_evidence": "근거 부족 · 재확인 필요",
+            }.get(summary["status"], "사람 검수 필요")
+            self.geometry_result.setText(
+                f"분석 {summary['captured_stages']}/4 · {status_label}"
+            )
+            labels = {
+                "match_candidate": "일치 후보",
+                "mismatch_review": "불일치 의심",
+                "insufficient_evidence": "판단 보류",
+                "not_applicable": "해당 없음",
+            }
+            lines = []
+            for stage in STAGES:
+                item = result["stages"][stage]
+                lines.append(f"[{STAGE_LABELS[stage]}]")
+                if item.get("capture_state") != "captured":
+                    lines.append("  사진 부족 · 먼저 해당 단계 촬영 필요")
+                    continue
+                for field, comparison in item.get("comparison", {}).items():
+                    exp = self._format_feature(comparison.get("expected_value"))
+                    obs = self._format_feature(comparison.get("observed_value"))
+                    verdict = labels.get(comparison.get("status"), "확인 필요")
+                    lines.append(
+                        f"  {FIELD_LABELS[field]}: 입력툴 {exp} / 로드뷰 {obs}"
+                        f"  → {verdict}"
+                    )
+                    if comparison.get("status") == "mismatch_review":
+                        lines.append("    " + comparison.get("reason", ""))
+            self.analysis_details.setPlainText("\n".join(lines))
+            self.status_label.setText("단계별 분석 완료 · 최종 검수 필요")
+            self._log(
+                f"4단계 사진 {summary['captured_stages']}/4 분석 완료 · "
+                f"{status_label}"
+            )
+            self._log(f"분석 결과: {Path(self.latest_folder) / 'staged_analysis.json'}")
         else:
-            self._log(f"완료: {result['frames']}개 화면 저장")
-            self.status_label.setText("캡쳐 완료")
+            self._log(f"미지원 결과 형식: {kind}")
         self._log(f"결과 폴더: {self.latest_folder}")
         self._log("최종 판정은 반드시 사용자가 진행해야 합니다.")
 
