@@ -99,6 +99,7 @@ class MainWindow(QMainWindow):
         self.review_monitor = None
         self._close_pending = False
         self.latest_folder: str | None = None
+        self._displayed_case_id = ""
         self.cfg = self._read_settings()
         self._setup()
         self._start_review_monitor()
@@ -534,6 +535,14 @@ class MainWindow(QMainWindow):
     def _refresh_stage_states(self, _text: str = "") -> None:
         from map_validator.stage_types import STAGES
         from map_validator.staged_capture import read_manifest, stage_status
+
+        current_id = self.case_input.text().strip()
+        if current_id != self._displayed_case_id:
+            self._displayed_case_id = current_id
+            self.geometry_result.setText("검수 ID 변경 · 촬영본 분석 전")
+            self.analysis_details.clear()
+            self.latest_folder = None
+            self.folder_btn.setEnabled(False)
 
         folder = self._case_folder()
         states = {
