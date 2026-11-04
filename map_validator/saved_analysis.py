@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 
 from .capture_naming import capture_file_name
+from .line_geometry import extract_line_geometry, compare_with_roadview
 from .road_analysis import RoadSegmenter, analyze_road_mask, draw_review_overlay
 
 
@@ -49,11 +50,12 @@ def analyze_saved_images(
     output: Path,
     case_id: str,
     roadview_title: str,
+    work_title: str,
     analysis_settings: dict,
     progress: Callable[[str], None],
     check_stop: Callable[[], None],
 ) -> dict:
-    """Run candidate-only segmentation on existing PNGs in an existing folder."""
+    """Compare existing HD_3D Tool route lines with saved roadview road regions."""
     check_stop()
     if not output.is_dir():
         raise FileNotFoundError(
@@ -78,6 +80,42 @@ def analyze_saved_images(
     threshold = float(analysis_settings.get("side_road_score_threshold", 0.19))
 
     frames: list[dict] = []
+    work_base = capture_file_name(case_id, work_title, 0, 1)
+    road_base = capture_file_name(case_id, roadview_title, 0, 1)
+    road_stem = road_base[:-4]
+    work_stem = work_base[:-4]
+    geometry_cache: dict[str, tuple[dict, str | None]] = {}
+
+    def work_geometry(road_source: Path) -> tuple[dict, str | None, str | None]:
+        """Match the input-tool image by the same capture suffix."""
+        suffix = road_source.stem[len(road_stem):] if (
+            road_source.stem.casefold().startswith(road_stem.casefold())
+        ) else ""
+        matching = output / (work_stem + suffix + ".png")
+        if not matching.is_file():
+            matching = output / work_base
+        if not matching.is_file():
+            return (
+                {"status": "unknown", "expected_turn": "unknown",
+                 "reason": "해당 검수 ID의 HD_3D Tool 스크린샷이 없습니다."},
+                None, None,
+            )
+        cache_key = str(matching)
+        if cache_key not in geometry_cache:
+            raw = np.fromfile(str(matching), dtype=np.uint8)
+            work_image = cv2.imdecode(raw, cv2.IMREAD_COLOR)
+            if work_image is None:
+                raise ValueError(f"입력도구 이미지 파일을 읽지 못했습니다: {matching}")
+            info, geometry_overlay = extract_line_geometry(work_image)
+            overlay_path = matching.with_name(matching.stem + "_geometry.png")
+            success, encoded = cv2.imencode(".png", geometry_overlay)
+            if not success:
+                raise RuntimeError(f"입력툴 선형 표시 PNG 인코딩 실패: {overlay_path}")
+            encoded.tofile(str(overlay_path))
+            geometry_cache[cache_key] = (info, overlay_path.name)
+        geometry, overlay_name = geometry_cache[cache_key]
+        return geometry, overlay_name, matching.name
+
     for index, source in enumerate(source_files):
         check_stop()
         progress(f"저장된 사진 분석 {index + 1}/{len(source_files)}: {source.name}")
@@ -89,7 +127,20 @@ def analyze_saved_images(
         mask = segmenter.mask(frame)
         check_stop()
         direction = analyze_road_mask(mask, threshold, vertical_range)
+        check_stop()
+        input_geometry, input_overlay, input_image = work_geometry(source)
+        comparison = compare_with_roadview(input_geometry, direction.as_dict())
         overlay = draw_review_overlay(frame, mask, direction, vertical_range)
+        comparison_label = (
+            f"INPUT {comparison['expected_turn'].upper()}: "
+            f"{comparison['status'].upper()}"
+        )
+        cv2.rectangle(overlay, (0, 0), (min(frame.shape[1], 760), 34), (0, 0, 0), -1)
+        cv2.putText(
+            overlay, comparison_label, (10, 24),
+            cv2.FONT_HERSHEY_SIMPLEX, .49, (255, 255, 255), 1,
+            cv2.LINE_AA,
+        )
         overlay_path = source.with_name(source.stem + "_overlay.png")
         encoded, png = cv2.imencode(".png", overlay)
         if not encoded:
@@ -99,6 +150,10 @@ def analyze_saved_images(
             "frame": index,
             "image": source.name,
             "overlay": overlay_path.name,
+            "work_image": input_image,
+            "work_geometry_overlay": input_overlay,
+            "input_line_geometry": input_geometry,
+            "geometry_comparison": comparison,
             **direction.as_dict(),
         })
 
@@ -110,25 +165,42 @@ def analyze_saved_images(
             else "not_detected_review_required"
         )
 
+    comparison_statuses = [
+        frame["geometry_comparison"]["status"] for frame in frames
+    ]
+    if "direction_consistent_candidate" in comparison_statuses:
+        overall_comparison = "direction_consistent_candidate"
+    elif "possible_mismatch_review" in comparison_statuses:
+        overall_comparison = "possible_mismatch_review"
+    else:
+        overall_comparison = "insufficient_evidence"
+
     report = {
         "case_id": case_id,
         "analyzed_at_utc": datetime.now(timezone.utc).isoformat(),
-        "source": "saved_roadview_screenshots",
+        "source": "saved_work_and_roadview_screenshots",
+        "geometry_comparison_status": overall_comparison,
         "frames": frames,
         "left_road": summary("left_candidate"),
         "right_road": summary("right_candidate"),
         "final_decision": "requires_human_review",
         "warning": (
-            "Road segmentation gives candidates only; original HD_3D Tool "
-            "line geometry and true turn-lane presence need human review."
+            "Cyan entry -> orange connector -> blue exit from the work image "
+            "is compared with a 2D roadview segmentation direction candidate. "
+            "No calibrated 3D alignment or lane-connectivity proof is possible "
+            "from these screenshots alone. Human verification is required."
         ),
     }
     (output / "analysis.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    progress(f"저장된 사진 {len(frames)}장 후보 분석 완료")
+    progress(
+        f"저장된 사진 {len(frames)}장 · 입력툴 선형 대조 완료 "
+        f"({overall_comparison})"
+    )
     return {
         "kind": "analysis",
+        "geometry_comparison_status": overall_comparison,
         "left": report["left_road"],
         "right": report["right_road"],
         "folder": str(output),
