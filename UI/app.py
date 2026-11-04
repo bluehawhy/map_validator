@@ -298,7 +298,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.setObjectName("danger")
         self.stop_btn.setEnabled(False)
         self.capture_btn.clicked.connect(lambda: self._start("capture"))
-        self.start_btn.clicked.connect(lambda: self._start("analyze"))
+        self.start_btn.clicked.connect(self._choose_review_folder)
         self.stop_btn.clicked.connect(self._stop)
         actions.addWidget(self.capture_btn, 1)
         actions.addWidget(self.start_btn, 1)
@@ -485,6 +485,58 @@ class MainWindow(QMainWindow):
             self._log("로컬 config.yaml 저장 완료 (기존 파일은 config.backups에 백업)")
         except Exception as exc:
             log_exception_at_source(APP_LOG, "설정 저장 실패", exc)
+
+    def _choose_review_folder(self) -> None:
+        """Let the user select a photo folder, then open it for manual review.
+
+        This intentionally performs no AI inference, roadview motion,
+        capture, or target-window manipulation.
+        """
+        if self.worker is not None and self.worker.isRunning():
+            return
+        try:
+            configured = Path(
+                self.output_input.text().strip() or "results"
+            ).expanduser()
+            output_root = (
+                configured if configured.is_absolute() else ROOT / configured
+            )
+            case_id = self.case_input.text().strip()
+            case_folder = output_root / case_id if case_id else None
+
+            # Start the folder picker at the selected intersection's results
+            # when available; let the user navigate elsewhere if preferred.
+            if case_folder is not None and case_folder.is_dir():
+                initial = case_folder
+            elif output_root.is_dir():
+                initial = output_root
+            elif self.latest_folder and Path(self.latest_folder).is_dir():
+                initial = Path(self.latest_folder)
+            else:
+                initial = ROOT
+
+            folder = QFileDialog.getExistingDirectory(
+                self, "도로후보 분석 - 사진 폴더 선택", str(initial)
+            )
+            if not folder:
+                return
+
+            selected = Path(folder)
+            if not selected.is_dir():
+                raise FileNotFoundError(f"사진 폴더가 존재하지 않습니다: {selected}")
+            if sys.platform != "win32":
+                raise RuntimeError("Windows 탐색기 폴더 열기는 Windows에서만 지원합니다.")
+
+            os.startfile(str(selected))
+            self.latest_folder = str(selected)
+            self.folder_btn.setEnabled(True)
+            self.status_label.setText("사진 직접 검수 중")
+            self._log(f"도로후보 수동 검수: 사진 폴더 열기 {selected}")
+            self._log(
+                "사진을 직접 확인하세요. 자동 캡처·로드뷰 이동·AI 분석은 실행하지 않습니다."
+            )
+        except Exception as exc:
+            log_exception_at_source(APP_LOG, "사진 폴더 열기 실패", exc)
 
     def _start(self, action: str) -> None:
         if self.worker is not None and self.worker.isRunning():
