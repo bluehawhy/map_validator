@@ -26,6 +26,9 @@ analysis:
   # 실무 적용 전 검증 필요
   side_road_score_threshold: 0.19
   vertical_range: [0.28, 0.60]
+  # 로드뷰 실제 정지선 단독 검출 신뢰도 기준(0.35~0.95).
+  # 횡단보도 반복 무늬는 제외하며, 불명확한 경우 REVIEW 처리.
+  stop_line_roadview_threshold: 0.68
 
 ui:
   opacity: 0.92
