@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         self.latest_folder: str | None = None
         self.cfg = self._read_settings()
         self._setup()
+        self._start_review_monitor()
 
     def _read_settings(self) -> dict:
         if not EXAMPLE.exists():
@@ -400,6 +401,52 @@ class MainWindow(QMainWindow):
                 self.output_input.setText(str(selected.relative_to(ROOT)))
             except ValueError:
                 self.output_input.setText(str(selected))
+
+    def _start_review_monitor(self) -> None:
+        self.review_timer = QTimer(self)
+        self.review_timer.setInterval(900)
+        self.review_timer.timeout.connect(self._refresh_selected_review_id)
+        self.review_timer.start()
+
+    def _refresh_selected_review_id(self) -> None:
+        if self.worker is not None and self.worker.isRunning():
+            return
+
+        review_title = self.cfg.get("windows", {}).get(
+            "intersection_review_title", ""
+        ).strip()
+        if not review_title:
+            return
+
+        try:
+            import pygetwindow as gw
+            from map_validator.windows import read_selected_intersection_id
+
+            active = gw.getActiveWindow()
+            if active is None or not active.title.strip():
+                return
+
+            comparable = lambda value: re.sub(
+                r"[^0-9a-z가-힣]+", "", value.casefold()
+            )
+            if comparable(review_title) not in comparable(active.title):
+                return
+
+            review_id = read_selected_intersection_id(review_title)
+            if review_id == self.case_input.text().strip():
+                return
+
+            self.case_input.setText(review_id)
+            cfg = self._current_settings()
+            CONFIG.write_text(
+                yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            self.cfg = cfg
+            self._log(f"검수 ID 자동 업데이트: {review_id}")
+        except Exception:
+            # Selection can be momentarily empty while the user changes tree items.
+            return
 
     def _current_settings(self) -> dict:
         cfg = self._read_settings()
