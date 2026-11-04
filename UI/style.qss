@@ -1,0 +1,63 @@
+QWidget#panel {
+    background-color: rgba(243, 243, 243, 246);
+    border-radius: 20px;
+    border: 1px solid rgba(225, 228, 232, 215);
+}
+QWidget#header, QWidget#body, QWidget#content { background: transparent; }
+QLabel { color: #313C45; background: transparent; font-size: 11px; }
+QLabel#title { color: #263540; font-size: 16px; font-weight: bold; }
+QLabel#status {
+    color: #2871A3;
+    background: rgba(255, 255, 255, 125);
+    border-radius: 7px;
+    padding: 5px 8px;
+    font-weight: bold;
+}
+QLabel#hint { color: #71808B; font-size: 10px; }
+QLabel#section { font-weight: bold; color: #44525D; padding-top: 5px; }
+QLabel#decision { color: #53616D; font-weight: bold; }
+QLineEdit, QComboBox, QSpinBox {
+    color: #263540;
+    background-color: rgba(255, 255, 255, 185);
+    border: 1px solid rgba(200, 205, 210, 180);
+    border-radius: 8px;
+    padding: 6px 7px;
+    font-size: 11px;
+    min-height: 19px;
+}
+QComboBox::drop-down { border: 0; width: 18px; }
+QCheckBox { color: #53616D; background: transparent; font-size: 11px; spacing: 7px; }
+QPushButton {
+    color: #46545E;
+    background-color: rgba(255, 255, 255, 190);
+    border: 1px solid rgba(205, 211, 216, 140);
+    border-radius: 8px;
+    padding: 7px;
+    font-size: 11px;
+}
+QPushButton:hover { background-color: rgba(228, 240, 247, 235); }
+QPushButton:disabled { color: #AAB2B9; background-color: rgba(255, 255, 255, 95); }
+QPushButton#primary { background: #3683B4; color: white; font-weight: bold; border: none; }
+QPushButton#primary:hover { background: #2573A7; }
+QPushButton#danger { color: #C34F4F; }
+QPushButton#header_button { min-width: 22px; max-width: 22px; padding: 1px; }
+QPushButton#select_button { min-width: 54px; max-width: 54px; padding: 6px; }
+QTextEdit {
+    color: #40505B;
+    background: rgba(255, 255, 255, 125);
+    border: 1px solid rgba(220, 223, 226, 140);
+    border-radius: 9px;
+    font-size: 11px;
+    padding: 6px;
+}
+QSlider::groove:horizontal {
+    height: 4px;
+    background: rgba(120, 135, 145, 90);
+    border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    width: 12px;
+    margin: -4px 0;
+    background: #3683B4;
+    border-radius: 6px;
+}
