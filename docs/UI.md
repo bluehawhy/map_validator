@@ -21,6 +21,27 @@ python -m UI
 
 또는 `UI\run_ui.bat`을 실행합니다. 실행할 때 `config.yaml`에 없는 항목만 `config.example.yaml`에서 추가하고, 기존에 들어 있는 항목과 값은 그대로 유지한 뒤 UI를 엽니다. `config.yaml`이 없으면 예제 설정으로 새로 만듭니다.
 
+## 앱 로그
+
+앱 시작, 창 검색, Polygon/Link 선택, 화면 준비, 캡처, 분석, 오류 및 Python 경고를 다음 구조로 표시·저장합니다.
+
+`로그타입 | 날짜 시간 | 코드파일:줄번호 | 로그 텍스트`
+
+예시 (파일명·줄번호는 실제 발생 위치에 따라 달라집니다):
+
+```text
+INFO | 2026-11-04 10:55:40.123 | UI/app.py:563 | 시작: analyze / Polygon 480706169- Link 98
+WARNING | 2026-11-04 10:55:40.456 | pywinauto/__init__.py:71 | UserWarning: Apply externally defined coinit_flags: 2
+ERROR | 2026-11-04 10:55:40.789 | map_validator/windows.py:142 | 작업 오류: zoom label was not exposed through Windows UI Automation | traceback: ...
+```
+
+- UI의 **작업 로그** 영역과 콘솔에서 동일 형식을 확인할 수 있습니다. **로그 복사**는 표시된 로그를 복사하며, **로그 폴더**는 저장된 로그 파일 위치를 엽니다.
+- 파일 경로: `logs/map_validator.log` (프로젝트 폴더 기준, Git 추적 제외). 최대 5 MiB마다 순환하며 `map_validator.log.1`~`.3`을 보관합니다.
+- 작업 스레드의 로그는 Qt 신호를 거쳐 UI에 표시하므로 스레드에서 위젯을 직접 수정하지 않습니다.
+- 오류는 가능한 경우 traceback의 **실제 예외 발생 파일과 줄번호**를 기록합니다. traceback은 한 줄 로그 안에 포함합니다.
+- `Apply externally defined coinit_flags: 2`는 외부에서 설정된 STA COM 방식을 pywinauto가 받아들였다는 안내 경고로, 동작 실패 자체를 의미하지 않습니다. 경고는 숨기지 않고 `WARNING`으로 기록합니다.
+- 로그에는 검수 ID, 작업 파일 경로 등의 정보가 포함될 수 있으므로 외부 공유 전 확인하세요.
+
 ## UI 항목과 작업
 
 - **창 정보 보기**: 대상 설정 오른쪽의 버튼을 누르면 현재 제목이 있는 Windows 창을 모달로 표시합니다. 창 제목 검색·새로고침·전체 목록 복사를 지원합니다. 내부 창이나 패널을 확인하려면 최상위 창(예: `HD_3D Tool`)을 선택한 뒤 **선택 창 내부 보기**를 누르세요. 하위 UI Automation 항목은 필요할 때만 최대 300개까지 조회하며, 대상 프로그램을 활성화하거나 설정 파일에 저장하지 않습니다.
