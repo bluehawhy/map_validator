@@ -135,6 +135,9 @@ class ControlWorker(QThread):
                 ),
                 progress=self._progress,
                 check_stop=self._check_stop,
+                stop_line_threshold=float(
+                    self.config.get("analysis", {}).get("stop_line_roadview_threshold", .68)
+                ),
             )
             self.result_ready.emit(result)
             return
