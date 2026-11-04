@@ -432,7 +432,7 @@ class MainWindow(QMainWindow):
             return
         try:
             cfg = self._current_settings()
-            if action != "open":
+            if action == "analyze":
                 review_title = cfg["windows"].get("intersection_review_title", "").strip()
                 if not review_title:
                     raise ValueError("config.yaml에 입력 교차로 타이틀을 설정하세요.")
