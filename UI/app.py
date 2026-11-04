@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
 )
 from map_validator.app_logging import (
     AppLogFormatter,
+    LOG_DIR,
     configure_app_logging,
     log_exception_at_source,
 )
@@ -344,10 +345,16 @@ class MainWindow(QMainWindow):
         self.save_btn = QPushButton("설정 저장")
         self.folder_btn = QPushButton("결과 폴더")
         self.folder_btn.setEnabled(False)
+        self.copy_logs_btn = QPushButton("로그 복사")
+        self.logs_folder_btn = QPushButton("로그 폴더")
         self.save_btn.clicked.connect(self._save_settings)
         self.folder_btn.clicked.connect(self._open_folder)
+        self.copy_logs_btn.clicked.connect(self._copy_logs)
+        self.logs_folder_btn.clicked.connect(self._open_logs_folder)
         footer.addWidget(self.save_btn)
         footer.addWidget(self.folder_btn)
+        footer.addWidget(self.copy_logs_btn)
+        footer.addWidget(self.logs_folder_btn)
         footer.addStretch(1)
         layout.addLayout(footer)
         self._log("준비 완료. 캡처 전에 로드뷰 창 제목을 확인하세요.")
@@ -622,6 +629,16 @@ class MainWindow(QMainWindow):
             else:
                 self._log("결과 폴더 열기는 Windows에서 지원합니다.")
 
+    def _copy_logs(self) -> None:
+        QApplication.clipboard().setText(self.logs.toPlainText())
+        self._log("표시된 작업 로그를 클립보드에 복사했습니다.")
+
+    def _open_logs_folder(self) -> None:
+        if sys.platform == "win32":
+            os.startfile(str(LOG_DIR))
+        else:
+            self._log("로그 폴더 열기는 Windows에서 지원합니다.", logging.WARNING)
+
     def _log(self, text: str, level: int = logging.INFO) -> None:
         APP_LOG.log(level, text, stacklevel=2)
 
@@ -643,6 +660,8 @@ class MainWindow(QMainWindow):
             self._log("작업 중입니다. 종료하려면 작업 중지 후 다시 닫아주세요.")
             event.ignore()
             return
+        APP_LOG.removeHandler(self._log_handler)
+        self._log_handler.close()
         event.accept()
 
 
