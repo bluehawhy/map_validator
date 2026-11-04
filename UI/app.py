@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 from datetime import datetime
@@ -331,20 +332,40 @@ class MainWindow(QMainWindow):
                 window for window in gw.getAllWindows()
                 if window.title.strip()
                 and window.title.strip() != self.windowTitle()
-                and window.width > 150
-                and window.height > 150
             ]
-            matches = [
+
+            direct_matches = [
+                window for window in gw.getWindowsWithTitle(configured)
+                if window.title.strip() != self.windowTitle()
+            ]
+
+            def comparable(value: str) -> str:
+                return re.sub(r"[^0-9a-z가-힣]+", "", value.casefold())
+
+            configured_key = comparable(configured)
+            normalized_matches = [
                 window for window in windows
-                if configured.casefold() == self._program_title(window.title).casefold()
-                or configured.casefold() in window.title.casefold()
+                if configured_key
+                and (
+                    configured_key == comparable(self._program_title(window.title))
+                    or configured_key in comparable(window.title)
+                )
             ]
+            matches = direct_matches or normalized_matches
             if not matches:
+                detected = ", ".join(window.title.strip() for window in windows[:8])
+                detail = f" 감지된 창: {detected}" if detected else " 감지된 창 없음"
                 raise RuntimeError(
-                    f"실행 중인 {label} 창을 찾지 못했습니다: {configured}"
+                    f"실행 중인 {label} 창을 찾지 못했습니다: {configured}.{detail}"
                 )
 
-            target = matches[0]
+            target = next(
+                (
+                    window for window in matches
+                    if comparable(self._program_title(window.title)) == configured_key
+                ),
+                matches[0],
+            )
             field.setText(configured)
             self._save_settings()
             if target.isMinimized:
