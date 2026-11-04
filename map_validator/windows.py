@@ -232,26 +232,21 @@ def set_zoom_value(window, value: int) -> None:
 
     raise RuntimeError(f"zoom could not reach {requested}; last value was {current}")
 
-def read_selected_intersection_id(title_keyword: str) -> str:
-    """Return the selected Polygon ID, optionally followed by its Link ID."""
-    from pywinauto import Desktop
+def _intersection_number(value: str, kind: str) -> str | None:
+    """Extract only a Polygon/Link identifier, not another number in the row."""
+    match = re.search(rf"\\b{kind}\\s*[:#-]?\\s*(\\d+)\\b", value, re.IGNORECASE)
+    return match.group(1) if match else None
 
-    configured_key = _comparable_title(title_keyword)
-    windows = [
-        window for window in Desktop(backend="uia").windows()
-        if configured_key
-        and configured_key in _comparable_title(window.window_text())
-    ]
-    if not windows:
-        raise RuntimeError(f"Intersection review window not found: {title_keyword!r}")
 
-    controls = windows[0].descendants()
-    tree_items = [
-        control for control in controls
-        if control.element_info.control_type == "TreeItem"
-    ]
-    if not tree_items:
-        raise RuntimeError("Intersection review tree was not exposed through Windows UI Automation")
+def _read_uia_intersection(window) -> str | None:
+    """Read an accessible selected TreeItem without changing selection."""
+    try:
+        tree_items = [
+            control for control in window.descendants()
+            if control.element_info.control_type == "TreeItem"
+        ]
+    except Exception:
+        return None
 
     def selected(control) -> bool:
         try:
@@ -268,66 +263,172 @@ def read_selected_intersection_id(title_keyword: str) -> str:
             return False
 
     selected_items = [item for item in tree_items if selected(item)]
-    polygon_item = next(
+    selected_polygon = next(
         (
-            item for item in selected_items
-            if re.search(r"\bPolygon\s*\d+\b", item.window_text(), re.IGNORECASE)
+            _intersection_number(item.window_text(), "Polygon")
+            for item in selected_items
+            if _intersection_number(item.window_text(), "Polygon") is not None
         ),
         None,
     )
-    link_item = next(
-        (
-            item for item in selected_items
-            if re.search(r"\bLink\s*\d+\b", item.window_text(), re.IGNORECASE)
-        ),
+    selected_link = next(
+        (item for item in selected_items
+         if _intersection_number(item.window_text(), "Link") is not None),
         None,
     )
+    if selected_link is None:
+        return f"Polygon {selected_polygon}" if selected_polygon else None
 
-    if polygon_item is not None and link_item is None:
-        polygon_match = re.search(
-            r"\bPolygon\s*(\d+)\b",
-            polygon_item.window_text(),
-            re.IGNORECASE,
-        )
-        if polygon_match is None:
-            raise RuntimeError(f"Polygon ID could not be read: {polygon_item.window_text()}")
-        return f"Polygon {polygon_match.group(1)}"
-
-    if link_item is None:
-        selected_text = ", ".join(item.window_text() for item in selected_items)
-        raise RuntimeError(
-            "Select a Polygon or Link item in the intersection review tree"
-            + (f": {selected_text}" if selected_text else "")
-        )
-
-    link_match = re.search(r"\bLink\s*(\d+)\b", link_item.window_text(), re.IGNORECASE)
-    if link_match is None:
-        raise RuntimeError(f"Link ID could not be read: {link_item.window_text()}")
-    link_id = link_match.group(1)
-
+    link_id = _intersection_number(selected_link.window_text(), "Link")
     polygon_id = None
     try:
-        parent = link_item.parent()
-        for _ in range(4):
-            text = parent.window_text()
-            match = re.search(r"\bPolygon\s*(\d+)\b", text, re.IGNORECASE)
-            if match:
-                polygon_id = match.group(1)
+        parent = selected_link.parent()
+        for _ in range(8):
+            if parent is None:
+                break
+            polygon_id = _intersection_number(parent.window_text(), "Polygon")
+            if polygon_id:
                 break
             parent = parent.parent()
     except Exception:
         pass
+    if not polygon_id:
+        try:
+            index = tree_items.index(selected_link)
+            for item in reversed(tree_items[:index]):
+                polygon_id = _intersection_number(item.window_text(), "Polygon")
+                if polygon_id:
+                    break
+        except ValueError:
+            pass
+    return f"Polygon {polygon_id}- Link {link_id}" if polygon_id else None
 
-    if polygon_id is None:
-        selected_index = tree_items.index(link_item)
-        for item in reversed(tree_items[:selected_index]):
-            match = re.search(r"\bPolygon\s*(\d+)\b", item.window_text(), re.IGNORECASE)
-            if match:
-                polygon_id = match.group(1)
-                break
 
-    if polygon_id is None:
-        raise RuntimeError("Parent Polygon ID could not be read for the selected Link")
+def _read_win32_intersection(handle: int) -> str | None:
+    """Fallback for native Win32 TreeView controls inside #32770 dialogs."""
+    from pywinauto import Desktop
 
-    return f"Polygon {polygon_id}- Link {link_id}"
+    try:
+        window = Desktop(backend="win32").window(handle=handle).wrapper_object()
+        controls = [window, *window.descendants()]
+    except Exception:
+        return None
 
+    for tree in controls:
+        try:
+            if tree.class_name().casefold() != "systreeview32":
+                continue
+            roots = tree.roots()
+        except Exception:
+            continue
+
+        # A tree node is not a native child window: inspect the Win32 TreeView
+        # item's selection state, keeping its actual Polygon ancestor.
+        stack = [(item, None) for item in reversed(roots)]
+        inspected = 0
+        last_polygon = None
+        while stack and inspected < 3000:
+            item, parent_polygon = stack.pop()
+            inspected += 1
+            try:
+                label = item.text()
+                polygon_id = _intersection_number(label, "Polygon")
+                link_id = _intersection_number(label, "Link")
+                selected = item.is_selected()
+                children = item.children()
+            except Exception:
+                continue
+
+            # The tree is walked in display order, so this also covers flat
+            # trees where links have no native Polygon parent item.
+            if polygon_id:
+                last_polygon = polygon_id
+            if selected and link_id:
+                owner = parent_polygon or last_polygon
+                if owner:
+                    return f"Polygon {owner}- Link {link_id}"
+            if selected and polygon_id:
+                return f"Polygon {polygon_id}"
+            child_owner = polygon_id or parent_polygon
+            stack.extend((child, child_owner) for child in reversed(children))
+    return None
+
+
+def read_selected_intersection_id(title_keyword: str) -> str:
+    """Return Polygon ID, with Link ID when a Link is selected.
+
+    UIA window enumeration can omit native #32770 dialogs. Locate the same
+    window by Win32 HWND if needed, and read either UIA TreeItems or a native
+    SysTreeView32. No selection, clicks or config values are changed.
+    """
+    import pygetwindow as gw
+    from pywinauto import Desktop
+
+    configured_key = _comparable_title(title_keyword)
+    if not configured_key:
+        raise ValueError("Intersection review window title cannot be empty")
+
+    uia_matches = []
+    try:
+        uia_matches = [
+            window for window in Desktop(backend="uia").windows()
+            if configured_key in _comparable_title(window.window_text())
+        ]
+    except Exception:
+        pass
+
+    # pygetwindow uses the Win32 window enumeration, which already detects
+    # the user's '교차로 선형 검수' dialog (class #32770).
+    win32_matches = []
+    try:
+        win32_matches = [
+            window for window in gw.getAllWindows()
+            if configured_key in _comparable_title(window.title)
+        ]
+    except Exception:
+        pass
+
+    handles = []
+    for window in uia_matches:
+        try:
+            handle = int(window.handle)
+            if handle and handle not in handles:
+                handles.append(handle)
+        except Exception:
+            pass
+    for window in win32_matches:
+        handle = int(getattr(window, "_hWnd", 0) or 0)
+        if handle and handle not in handles:
+            handles.append(handle)
+
+    if not handles and not uia_matches:
+        raise RuntimeError(
+            f"Intersection review window not found (UIA / Win32): {title_keyword!r}"
+        )
+
+    for window in uia_matches:
+        result = _read_uia_intersection(window)
+        if result:
+            return result
+
+    # A Win32-discovered HWND may still have a usable UIA tree even if
+    # Desktop(backend='uia').windows() omitted the top-level dialog.
+    for handle in handles:
+        try:
+            window = Desktop(backend="uia").window(handle=handle).wrapper_object()
+            result = _read_uia_intersection(window)
+            if result:
+                return result
+        except Exception:
+            pass
+
+    for handle in handles:
+        result = _read_win32_intersection(handle)
+        if result:
+            return result
+
+    raise RuntimeError(
+        "Intersection review window found, but selected Polygon/Link could "
+        "not be read via UIA or Win32. Check the selected tree item and "
+        "whether the application exposes a SysTreeView32 control."
+    )
