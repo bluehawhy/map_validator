@@ -1,7 +1,9 @@
 # Windows 창 제목에서 매칭할 일부 문자열
 windows:
-  work_title: "업무 프로그램"
-  roadview_title: "로드뷰"
+  work_title: "HD_3D Tool"
+  roadview_title: "NLadybugSv"
+  # 입력 교차로 타이틀
+  intersection_review_title: "교차로 선형 검수"
   open_button_image: "assets/open_roadview.png"
 
 preparation:
