@@ -715,13 +715,32 @@ class MainWindow(QMainWindow):
             road_scores = result.get("road_scores", {})
             before_scores = road_scores.get("before", {})
             after_scores = road_scores.get("after", {})
-            differences = road_scores.get("delta_after_minus_before", {})
 
             def display_score(value) -> str:
                 return "—" if value is None else f"{value:.4f}"
 
             lines = []
             if road_scores:
+                directions = (("left", "좌"), ("straight", "직"), ("right", "우"))
+                input_items = []
+                geometry_items = []
+                for direction, label in directions:
+                    stage_item = result["stages"].get("after_" + direction, {})
+                    expected = stage_item.get("input_expected", {}).get("road_exists", {})
+                    value = self._format_feature(expected.get("value"))
+                    confidence = expected.get("confidence")
+                    score = "—" if confidence is None else f"{confidence:.2f}"
+                    input_items.append(f"{label} {value} (후보 점수 {score})")
+                    route = stage_item.get("route_candidate", {})
+                    angle = route.get("turn_angle_deg")
+                    if route.get("status") == "candidate" and angle is not None:
+                        geometry = f"{angle:.1f}° 후보"
+                    else:
+                        geometry = "판독 보류"
+                    geometry_items.append(f"{label} {geometry} / 코드 판독 불가")
+                lines.append("입력툴: " + "  |  ".join(input_items))
+                lines.append("도로 선형: " + "  |  ".join(geometry_items))
+                lines.append("※ 입력툴 점수는 색상 경로 후보의 고정 휴리스틱 점수이며 확률이 아닙니다.")
                 lines.extend([
                     "[도로 영역 스코어 · 0~1, 높을수록 ROI 내 도로 픽셀 많음]",
                     "진입 전 : 좌 {0}  |  직 {1}  |  우 {2}".format(
@@ -734,12 +753,7 @@ class MainWindow(QMainWindow):
                         display_score(after_scores.get("straight", {}).get("straight_score")),
                         display_score(after_scores.get("right", {}).get("straight_score")),
                     ),
-                    "차이(후-전): 좌 {0}  |  직 {1}  |  우 {2}".format(
-                        display_score(differences.get("left")),
-                        display_score(differences.get("straight")),
-                        display_score(differences.get("right")),
-                    ),
-                    "※ 촬영 시점이 달라 스코어 차이만으로 불일치를 확정하지 않습니다.",
+                    "※ 진입 후 도로 존재는 각 사진의 전방 중앙을 따로 확인합니다.",
                     "",
                 ])
             for stage in STAGES:
