@@ -52,8 +52,18 @@ def find_window(title_keyword: str):
     )
 
 
-def activate(window) -> None:
+def activate(window, *, allow_restore: bool = True) -> None:
+    """Focus a window without moving or resizing it.
+
+    Some HD_3D Tool views become blank when restored/relaid out. Work-tool
+    callers pass allow_restore=False so only a human can restore that window.
+    """
     if window.isMinimized:
+        if not allow_restore:
+            raise RuntimeError(
+                "입력도구가 최소화되어 있습니다. 창 위치/크기 보호를 위해 "
+                "자동 복원하지 않습니다. 직접 복원한 뒤 다시 실행하세요."
+            )
         window.restore()
     window.activate()
     time.sleep(0.4)
@@ -85,7 +95,7 @@ def click_template_in_window(window, template_path: str, threshold: float = 0.88
         raise FileNotFoundError(f"Template image missing: {path}")
     # The template click still requires the work app to be foreground;
     # passive window capture by itself must not steal focus.
-    activate(window)
+    activate(window, allow_restore=False)
     image = capture_window(window)
     template = cv2.imread(str(path), cv2.IMREAD_COLOR)
     if template is None:
@@ -117,7 +127,8 @@ def set_zoom_value(window, value: int) -> None:
     if not 1 <= requested <= 500:
         raise ValueError("zoom value must be between 1 and 500")
 
-    activate(window)
+    # HD_3D Tool must not be restored, resized, or moved automatically.
+    activate(window, allow_restore=False)
     title = window.title.strip()
     candidates = Desktop(backend="uia").windows(title=title)
     if not candidates:
@@ -346,11 +357,11 @@ def _read_win32_intersection(handle: int) -> str | None:
 
 
 def read_selected_intersection_id(title_keyword: str) -> str:
-    """Return Polygon ID, with Link ID when a Link is selected.
+    """Read Polygon/Link selection from the review dialog without focus changes.
 
-    UIA window enumeration can omit native #32770 dialogs. Locate the same
-    window by Win32 HWND if needed, and read either UIA TreeItems or a native
-    SysTreeView32. No selection, clicks or config values are changed.
+    Prefer HWND-based lookup to avoid enumerating the entire UI Automation
+    desktop on each background poll. UIA enumeration is a fallback only when
+    the native Win32 title enumeration cannot locate the dialog.
     """
     import pygetwindow as gw
     from pywinauto import Desktop
@@ -359,17 +370,6 @@ def read_selected_intersection_id(title_keyword: str) -> str:
     if not configured_key:
         raise ValueError("Intersection review window title cannot be empty")
 
-    uia_matches = []
-    try:
-        uia_matches = [
-            window for window in Desktop(backend="uia").windows()
-            if configured_key in _comparable_title(window.window_text())
-        ]
-    except Exception:
-        pass
-
-    # pygetwindow uses the Win32 window enumeration, which already detects
-    # the user's '교차로 선형 검수' dialog (class #32770).
     win32_matches = []
     try:
         win32_matches = [
@@ -380,43 +380,55 @@ def read_selected_intersection_id(title_keyword: str) -> str:
         pass
 
     handles = []
-    for window in uia_matches:
-        try:
-            handle = int(window.handle)
-            if handle and handle not in handles:
-                handles.append(handle)
-        except Exception:
-            pass
     for window in win32_matches:
         handle = int(getattr(window, "_hWnd", 0) or 0)
         if handle and handle not in handles:
             handles.append(handle)
 
-    if not handles and not uia_matches:
-        raise RuntimeError(
-            f"Intersection review window not found (UIA / Win32): {title_keyword!r}"
-        )
+    if handles:
+        # A Win32 top-level dialog may be absent from Desktop("uia").windows()
+        # yet directly reachable through its HWND.
+        for handle in handles:
+            try:
+                wrapper = Desktop(backend="uia").window(handle=handle).wrapper_object()
+                result = _read_uia_intersection(wrapper)
+                if result:
+                    return result
+            except Exception:
+                pass
 
-    for window in uia_matches:
-        result = _read_uia_intersection(window)
-        if result:
-            return result
-
-    # A Win32-discovered HWND may still have a usable UIA tree even if
-    # Desktop(backend='uia').windows() omitted the top-level dialog.
-    for handle in handles:
+        for handle in handles:
+            result = _read_win32_intersection(handle)
+            if result:
+                return result
+    else:
+        # Only use the expensive desktop UIA enumeration for dialogs that
+        # Win32 cannot see at all.
         try:
-            window = Desktop(backend="uia").window(handle=handle).wrapper_object()
+            uia_matches = [
+                window for window in Desktop(backend="uia").windows()
+                if configured_key in _comparable_title(window.window_text())
+            ]
+        except Exception:
+            uia_matches = []
+
+        if not uia_matches:
+            raise RuntimeError(
+                f"Intersection review window not found (Win32 / UIA): {title_keyword!r}"
+            )
+
+        for window in uia_matches:
             result = _read_uia_intersection(window)
             if result:
                 return result
-        except Exception:
-            pass
-
-    for handle in handles:
-        result = _read_win32_intersection(handle)
-        if result:
-            return result
+            try:
+                handle = int(window.handle)
+                if handle:
+                    result = _read_win32_intersection(handle)
+                    if result:
+                        return result
+            except Exception:
+                pass
 
     raise RuntimeError(
         "Intersection review window found, but selected Polygon/Link could "
