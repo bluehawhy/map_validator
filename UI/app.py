@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -120,16 +121,17 @@ class MainWindow(QMainWindow):
         if not isinstance(saved, dict):
             raise ValueError("config.yaml 내용이 올바르지 않습니다.")
 
-        def merge(base: dict, override: dict) -> dict:
-            result = dict(base)
-            for key, value in override.items():
-                if isinstance(value, dict) and isinstance(result.get(key), dict):
-                    result[key] = merge(result[key], value)
-                else:
-                    result[key] = value
+        def add_missing(existing: dict, default_values: dict) -> dict:
+            """Add only absent keys. Existing config.yaml values always win."""
+            result = dict(existing)
+            for key, default_value in default_values.items():
+                if key not in result:
+                    result[key] = default_value
+                elif isinstance(result[key], dict) and isinstance(default_value, dict):
+                    result[key] = add_missing(result[key], default_value)
             return result
 
-        return merge(defaults, saved)
+        return add_missing(saved, defaults)
 
     def _label(self, text: str, kind: str | None = None) -> QLabel:
         label = QLabel(text)
@@ -319,12 +321,17 @@ class MainWindow(QMainWindow):
     def _save_settings(self) -> None:
         try:
             cfg = self._current_settings()
+            if CONFIG.exists():
+                backup_dir = ROOT / "config.backups"
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+                shutil.copy2(CONFIG, backup_dir / f"config-{stamp}.yaml")
             CONFIG.write_text(
                 yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
                 encoding="utf-8",
             )
             self.cfg = cfg
-            self._log("로컬 config.yaml 저장 완료 (Git에는 업로드되지 않음)")
+            self._log("로컬 config.yaml 저장 완료 (기존 파일은 config.backups에 백업)")
         except Exception as exc:
             self._log(f"설정 저장 실패: {exc}")
 
