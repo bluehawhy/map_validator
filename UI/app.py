@@ -15,7 +15,6 @@ from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
-    QComboBox,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -24,7 +23,6 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QSlider,
-    QSpinBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -162,7 +160,8 @@ class MainWindow(QMainWindow):
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedSize(470, 730)
+        self.setMinimumSize(490, 740)
+        self.resize(520, 830)
         opacity = float(self.cfg.get("ui", {}).get("opacity", 0.92))
         self.setWindowOpacity(max(0.35, min(opacity, 1.0)))
         outer = QWidget()
@@ -272,48 +271,56 @@ class MainWindow(QMainWindow):
         output_row.addWidget(output_browse)
         layout.addLayout(output_row)
 
-        layout.addWidget(self._label("이동 및 분석", "section"))
-        action_row = QHBoxLayout()
-        self.move_combo = QComboBox()
-        self.move_combo.addItem("이동 없음", "none")
-        self.move_combo.addItem("W 전진", "forward")
-        self.move_combo.addItem("S 후진", "backward")
-        self.step_spin = QSpinBox()
-        self.step_spin.setRange(0, max(0, int(self.cfg["movement"].get("max_steps", 5))))
-        self.step_spin.setValue(min(2, self.step_spin.maximum()))
-        action_row.addWidget(self._label("동작"))
-        action_row.addWidget(self.move_combo, 1)
-        action_row.addWidget(self._label("횟수"))
-        action_row.addWidget(self.step_spin)
-        layout.addLayout(action_row)
+        from map_validator.stage_types import STAGES, STAGE_BUTTONS, STAGE_LABELS
 
-        layout.addWidget(self._label("※ 좌우 시점 회전 없음 · 직진/노면표시 판정 없음", "hint"))
+        layout.addWidget(self._label("1. 단계별 수동 촬영", "section"))
+        layout.addWidget(self._label(
+            "※ 각 방향은 도로가 없어도 촬영하세요. 위치·시점은 직접 조정합니다.", "hint"
+        ))
+        self.stage_buttons = {}
+        self.stage_status_labels = {}
+        for stage in STAGES:
+            row = QHBoxLayout()
+            button = QPushButton(STAGE_BUTTONS[stage])
+            button.setToolTip(
+                f"{STAGE_LABELS[stage]}의 현재 HD_3D Tool/로드뷰 화면을 각각 1장 저장"
+            )
+            button.clicked.connect(
+                lambda checked=False, selected=stage: self._start(
+                    "capture_" + selected
+                )
+            )
+            status = self._label("미촬영", "hint")
+            status.setMinimumWidth(112)
+            row.addWidget(button, 3)
+            row.addWidget(status, 2)
+            layout.addLayout(row)
+            self.stage_buttons[stage] = button
+            self.stage_status_labels[stage] = status
 
         actions = QHBoxLayout()
-        actions.setSpacing(6)
-        self.capture_btn = QPushButton("캡쳐만")
-        self.start_btn = QPushButton("도로후보 분석")
+        self.start_btn = QPushButton("촬영본 분석")
         self.start_btn.setObjectName("primary")
         self.stop_btn = QPushButton("분석 중지")
         self.stop_btn.setObjectName("danger")
         self.stop_btn.setEnabled(False)
-        self.capture_btn.clicked.connect(lambda: self._start("capture"))
-        self.start_btn.clicked.connect(lambda: self._start("analyze"))
+        self.start_btn.clicked.connect(lambda: self._start("analyze_staged"))
         self.stop_btn.clicked.connect(self._stop)
-        actions.addWidget(self.capture_btn, 1)
-        actions.addWidget(self.start_btn, 1)
+        actions.addWidget(self.start_btn, 2)
         actions.addWidget(self.stop_btn, 1)
         layout.addLayout(actions)
 
-        layout.addWidget(self._label("분석 결과 (후보일 뿐, 확정 아님)", "section"))
-        decision_row = QHBoxLayout()
-        self.left_result = self._label("좌측: 대기", "decision")
-        self.right_result = self._label("우측: 대기", "decision")
-        decision_row.addWidget(self.left_result, 1)
-        decision_row.addWidget(self.right_result, 1)
-        layout.addLayout(decision_row)
-        self.geometry_result = self._label("선형 대조: 분석 전", "decision")
+        layout.addWidget(self._label("2. 항목별 비교 결과 (검수 보조)", "section"))
+        self.geometry_result = self._label("분석 전 · 최종 사람 검수 필요", "decision")
         layout.addWidget(self.geometry_result)
+        self.analysis_details = QTextEdit()
+        self.analysis_details.setReadOnly(True)
+        self.analysis_details.setMinimumHeight(115)
+        self.analysis_details.setPlaceholderText(
+            "진입 전: 정지선 / 차로 수 / 화살표 / 컬러유도선\n"
+            "진입 후 좌·직·우: 도로 유무 / 차로 수 / 일반·컬러유도선"
+        )
+        layout.addWidget(self.analysis_details, 1)
 
         layout.addWidget(self._label("작업 로그", "section"))
         self.logs = QTextEdit()
@@ -341,7 +348,9 @@ class MainWindow(QMainWindow):
         footer.addWidget(self.logs_folder_btn)
         footer.addStretch(1)
         layout.addLayout(footer)
-        self._log("준비 완료. 캡처 전에 로드뷰 창 제목을 확인하세요.")
+        self.case_input.textChanged.connect(self._refresh_stage_states)
+        self._refresh_stage_states()
+        self._log("준비 완료. 진입 전→좌→직→우 네 방향을 각각 수동 촬영하세요.")
 
     @staticmethod
     def _program_title(window_title: str) -> str:
