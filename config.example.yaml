@@ -22,4 +22,5 @@ analysis:
   vertical_range: [0.28, 0.60]
 
 output:
+  # 상대 경로는 프로젝트 폴더 기준. Windows 절대 경로도 사용 가능
   directory: "results"
