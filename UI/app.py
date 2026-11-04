@@ -97,6 +97,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.worker = None
+        self.review_monitor = None
+        self._close_pending = False
         self.latest_folder: str | None = None
         self.cfg = self._read_settings()
         self._setup()
@@ -455,44 +457,33 @@ class MainWindow(QMainWindow):
                 self.output_input.setText(str(selected))
 
     def _start_review_monitor(self) -> None:
-        self.review_timer = QTimer(self)
-        self.review_timer.setInterval(900)
-        self.review_timer.timeout.connect(self._refresh_selected_review_id)
-        self.review_timer.start()
-
-    def _refresh_selected_review_id(self) -> None:
-        if self.worker is not None and self.worker.isRunning():
-            return
+        from .review_monitor import ReviewSelectionMonitor
 
         review_title = self.cfg.get("windows", {}).get(
             "intersection_review_title", ""
         ).strip()
         if not review_title:
             return
+        self.review_monitor = ReviewSelectionMonitor(review_title, self)
+        self.review_monitor.selection_changed.connect(self._on_review_selection)
+        self.review_monitor.finished.connect(self._on_review_monitor_finished)
+        self.review_monitor.start()
 
-        try:
-            import pygetwindow as gw
-            from map_validator.windows import read_selected_intersection_id
-
-            active = gw.getActiveWindow()
-            if active is None or not active.title.strip():
-                return
-
-            comparable = lambda value: re.sub(
-                r"[^0-9a-z가-힣]+", "", value.casefold()
-            )
-            if comparable(review_title) not in comparable(active.title):
-                return
-
-            review_id = read_selected_intersection_id(review_title)
-            if review_id == self.case_input.text().strip():
-                return
-
+    def _on_review_selection(self, review_id: str) -> None:
+        if self._close_pending or (
+            self.worker is not None and self.worker.isRunning()
+        ):
+            return
+        if review_id != self.case_input.text().strip():
             self.case_input.setText(review_id)
             self._log(f"검수 ID 자동 업데이트: {review_id}")
-        except Exception:
-            # Selection can be momentarily empty while the user changes tree items.
-            return
+
+    def _on_review_monitor_finished(self) -> None:
+        if self._close_pending:
+            QTimer.singleShot(0, self.close)
+
+    def _on_analysis_case_id(self, case_id: str) -> None:
+        self.case_input.setText(case_id)
 
     def _current_settings(self) -> dict:
         cfg = self._read_settings()
@@ -525,19 +516,14 @@ class MainWindow(QMainWindow):
         try:
             cfg = self._current_settings()
             if action == "analyze":
-                review_title = cfg["windows"].get("intersection_review_title", "").strip()
-                if not review_title:
+                if not cfg["windows"].get("intersection_review_title", "").strip():
                     raise ValueError("config.yaml에 입력 교차로 타이틀을 설정하세요.")
-                from map_validator.windows import read_selected_intersection_id
-
-                case_id = read_selected_intersection_id(review_title)
-                self.case_input.setText(case_id)
-                self._log(f"선택 교차로 검수 ID: {case_id}")
+                # Resolve the selected ID on ControlWorker's QThread, never here.
+                case_id = ""
             else:
                 case_id = self.case_input.text().strip()
-
-            if not case_id:
-                raise ValueError("검수 ID를 입력하세요.")
+                if not case_id:
+                    raise ValueError("검수 ID를 입력하세요.")
             if not cfg["windows"]["roadview_title"].strip() and action != "open":
                 raise ValueError("로드뷰 창 제목을 입력하세요.")
             if not cfg["windows"]["work_title"].strip() and (
@@ -558,15 +544,18 @@ class MainWindow(QMainWindow):
                 parent=self,
             )
             self.worker.progress.connect(self.status_label.setText)
+            self.worker.case_id_ready.connect(self._on_analysis_case_id)
             self.worker.result_ready.connect(self._show_result)
             self.worker.hide_panel.connect(self._hide_for_capture)
             self.worker.show_panel.connect(self._restore_panel)
             self.worker.finished.connect(self._done)
             self._busy(True)
+            if action == "analyze":
+                self.case_input.clear()
             self.left_result.setText("좌측: 분석 전")
             self.right_result.setText("우측: 분석 전")
             self.status_label.setText("진행 중")
-            self._log(f"시작: {action} / {case_id}")
+            self._log(f"시작: {action} / {case_id or '교차로 선택값 조회 중'}")
             self.worker.start()
         except Exception as exc:
             log_exception_at_source(APP_LOG, "시작 실패", exc)
@@ -580,6 +569,8 @@ class MainWindow(QMainWindow):
         ):
             widget.setEnabled(not busy)
         self.stop_btn.setEnabled(busy)
+        if self.review_monitor is not None:
+            self.review_monitor.set_paused(busy)
 
     def _hide_for_capture(self) -> None:
         self.hide()
@@ -658,6 +649,15 @@ class MainWindow(QMainWindow):
         if self.worker is not None and self.worker.isRunning():
             self._stop()
             self._log("작업 중입니다. 종료하려면 작업 중지 후 다시 닫아주세요.")
+            event.ignore()
+            return
+        if self.review_monitor is not None and self.review_monitor.isRunning():
+            if not self._close_pending:
+                self._close_pending = True
+                self.review_monitor.set_paused(True)
+                self.review_monitor.requestInterruption()
+                self.status_label.setText("선택 감시 종료 중")
+                self._log("선택 감시 스레드 종료 요청")
             event.ignore()
             return
         APP_LOG.removeHandler(self._log_handler)
