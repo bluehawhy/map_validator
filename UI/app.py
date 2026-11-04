@@ -27,8 +27,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .worker import ControlWorker
-
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config.yaml"
 EXAMPLE = ROOT / "config.example.yaml"
@@ -103,19 +101,35 @@ class DragHeader(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.worker: ControlWorker | None = None
+        self.worker = None
         self.latest_folder: str | None = None
         self.cfg = self._read_settings()
         self._setup()
 
     def _read_settings(self) -> dict:
-        source = CONFIG if CONFIG.exists() else EXAMPLE
-        if not source.exists():
+        if not EXAMPLE.exists():
             raise FileNotFoundError(f"설정 예제 파일이 없습니다: {EXAMPLE}")
-        data = yaml.safe_load(source.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("설정 YAML 내용이 올바르지 않습니다.")
-        return data
+
+        defaults = yaml.safe_load(EXAMPLE.read_text(encoding="utf-8"))
+        if not isinstance(defaults, dict):
+            raise ValueError("설정 예제 YAML 내용이 올바르지 않습니다.")
+        if not CONFIG.exists():
+            return defaults
+
+        saved = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+        if not isinstance(saved, dict):
+            raise ValueError("config.yaml 내용이 올바르지 않습니다.")
+
+        def merge(base: dict, override: dict) -> dict:
+            result = dict(base)
+            for key, value in override.items():
+                if isinstance(value, dict) and isinstance(result.get(key), dict):
+                    result[key] = merge(result[key], value)
+                else:
+                    result[key] = value
+            return result
+
+        return merge(defaults, saved)
 
     def _label(self, text: str, kind: str | None = None) -> QLabel:
         label = QLabel(text)
@@ -129,7 +143,7 @@ class MainWindow(QMainWindow):
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedSize(428, 680)
+        self.setFixedSize(428, 730)
         outer = QWidget()
         outer.setObjectName("panel")
         outer.setStyleSheet(STYLE)
@@ -182,6 +196,21 @@ class MainWindow(QMainWindow):
         template_row.addWidget(self.template_input, 1)
         template_row.addWidget(browse)
         layout.addLayout(template_row)
+
+        output_row = QHBoxLayout()
+        self.output_input = QLineEdit(
+            self.cfg.get("output", {}).get("directory", "results")
+        )
+        self.output_input.setPlaceholderText("스크린샷과 분석 결과 저장 폴더")
+        self.output_input.setToolTip(
+            "상대 경로는 프로젝트 폴더 기준이며, 다른 드라이브의 절대 경로도 사용할 수 있습니다."
+        )
+        output_browse = QPushButton("찾기")
+        output_browse.clicked.connect(self._select_output)
+        output_row.addWidget(self._label("저장 경로"))
+        output_row.addWidget(self.output_input, 1)
+        output_row.addWidget(output_browse)
+        layout.addLayout(output_row)
 
         layout.addWidget(self._label("이동 및 분석", "section"))
         action_row = QHBoxLayout()
@@ -260,11 +289,31 @@ class MainWindow(QMainWindow):
             except ValueError:
                 self.template_input.setText(filename)
 
+    def _select_output(self) -> None:
+        current = self.output_input.text().strip() or "results"
+        start = Path(current)
+        if not start.is_absolute():
+            start = ROOT / start
+        if not start.exists():
+            start = start.parent if start.parent.exists() else ROOT
+        folder = QFileDialog.getExistingDirectory(
+            self, "스크린샷 저장 폴더 선택", str(start)
+        )
+        if folder:
+            selected = Path(folder)
+            try:
+                self.output_input.setText(str(selected.relative_to(ROOT)))
+            except ValueError:
+                self.output_input.setText(str(selected))
+
     def _current_settings(self) -> dict:
         cfg = self._read_settings()
+        cfg.setdefault("windows", {})
+        cfg.setdefault("output", {})
         cfg["windows"]["work_title"] = self.work_input.text().strip()
         cfg["windows"]["roadview_title"] = self.view_input.text().strip()
         cfg["windows"]["open_button_image"] = self.template_input.text().strip()
+        cfg["output"]["directory"] = self.output_input.text().strip() or "results"
         return cfg
 
     def _save_settings(self) -> None:
@@ -294,6 +343,8 @@ class MainWindow(QMainWindow):
             ):
                 raise ValueError("업무 창 제목을 입력하세요.")
             self.cfg = cfg
+            from .worker import ControlWorker
+
             self.worker = ControlWorker(
                 config=cfg,
                 config_dir=ROOT,
@@ -323,7 +374,7 @@ class MainWindow(QMainWindow):
         for widget in (
             self.open_btn, self.capture_btn, self.start_btn, self.save_btn,
             self.case_input, self.work_input, self.view_input, self.template_input,
-            self.move_combo, self.step_spin, self.open_first,
+            self.output_input, self.move_combo, self.step_spin, self.open_first,
         ):
             widget.setEnabled(not busy)
         self.stop_btn.setEnabled(busy)
