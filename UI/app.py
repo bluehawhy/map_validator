@@ -18,7 +18,6 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -189,7 +188,7 @@ class MainWindow(QMainWindow):
         self.work_select_btn = QPushButton("선택")
         self.work_select_btn.setObjectName("select_button")
         self.work_select_btn.clicked.connect(
-            lambda: self._select_running_window(self.work_input, "입력 프로그램")
+            lambda: self._activate_configured_window(self.work_input, "입력 프로그램")
         )
         basic_grid.addWidget(self._label("입력 프로그램"), 0, 0)
         basic_grid.addWidget(self.work_input, 0, 1)
@@ -200,7 +199,7 @@ class MainWindow(QMainWindow):
         self.view_select_btn = QPushButton("선택")
         self.view_select_btn.setObjectName("select_button")
         self.view_select_btn.clicked.connect(
-            lambda: self._select_running_window(self.view_input, "로드뷰 프로그램")
+            lambda: self._activate_configured_window(self.view_input, "로드뷰 프로그램")
         )
         basic_grid.addWidget(self._label("로드뷰 프로그램"), 1, 0)
         basic_grid.addWidget(self.view_input, 1, 1)
@@ -312,42 +311,29 @@ class MainWindow(QMainWindow):
         layout.addLayout(footer)
         self._log("준비 완료. 캡처 전에 로드뷰 창 제목을 확인하세요.")
 
-    def _select_running_window(self, field: QLineEdit, label: str) -> None:
+    def _activate_configured_window(self, field: QLineEdit, label: str) -> None:
         try:
             import pygetwindow as gw
 
+            title = field.text().strip()
+            if not title:
+                raise ValueError(f"{label} 창 제목을 먼저 입력하세요.")
+
             windows = [
                 window for window in gw.getAllWindows()
-                if window.title.strip()
-                and window.title.strip() != self.windowTitle()
+                if title.casefold() in window.title.casefold()
                 and window.width > 150
                 and window.height > 150
             ]
-            titles = sorted({window.title.strip() for window in windows})
-            if not titles:
-                raise RuntimeError("선택할 수 있는 실행 중인 창이 없습니다.")
+            if not windows:
+                raise RuntimeError(f"실행 중인 {label} 창을 찾지 못했습니다: {title}")
 
-            current = field.text().strip()
-            current_index = titles.index(current) if current in titles else 0
-            selected, accepted = QInputDialog.getItem(
-                self,
-                f"{label} 선택",
-                "실행 중인 창:",
-                titles,
-                current_index,
-                False,
-            )
-            if not accepted or not selected:
-                return
-
-            field.setText(selected)
+            target = windows[0]
             self._save_settings()
-            for window in windows:
-                if window.title.strip() == selected:
-                    if window.isMinimized:
-                        window.restore()
-                    window.activate()
-                    break
+            self.showMinimized()
+            if target.isMinimized:
+                target.restore()
+            target.activate()
         except Exception as exc:
             self._log(f"{label} 선택 실패: {exc}")
 
