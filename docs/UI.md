@@ -17,7 +17,7 @@ python -m pip install -r requirements-ai.txt
 python -m UI
 ```
 
-또는 `UI\run_ui.bat`을 실행합니다. 이미 `config.yaml`이 있으면 예제 파일을 다시 복사하지 않습니다. 프로그램은 예제 설정의 새 항목과 기존 설정을 실행 시 병합하며, 기존에 저장한 값은 유지합니다.
+또는 `UI\run_ui.bat`을 실행합니다. 실행할 때 `config.yaml`에 없는 항목만 `config.example.yaml`에서 추가하고, 기존에 들어 있는 항목과 값은 그대로 유지한 뒤 UI를 엽니다. `config.yaml`이 없으면 예제 설정으로 새로 만듭니다.
 
 ## UI 항목과 작업
 
