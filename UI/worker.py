@@ -28,7 +28,6 @@ from map_validator.road_analysis import (
 )
 from map_validator.windows import (
     capture_window,
-    click_template_in_window,
     find_window,
     move_roadview,
     scroll_to_bottom,
@@ -50,17 +49,15 @@ class ControlWorker(QThread):
         action: str,
         movement: str,
         steps: int,
-        open_first: bool,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.config = config
         self.config_dir = config_dir
         self.case_id = case_id
-        self.action = action  # open | capture | analyze
+        self.action = action  # capture | analyze
         self.movement = movement
         self.steps = steps
-        self.open_first = open_first
         self._stop = threading.Event()
         self._hidden = threading.Event()
 
@@ -91,19 +88,6 @@ class ControlWorker(QThread):
     def _path(self, name: str) -> Path:
         p = Path(name)
         return p if p.is_absolute() else self.config_dir / p
-
-    def _open_roadview(self) -> None:
-        self._progress("업무 프로그램에서 로드뷰 열기")
-        work = find_window(self.config["windows"]["work_title"])
-        template_path = self._path(self.config["windows"]["open_button_image"])
-        self._hide_before_desktop_action()
-        try:
-            if not click_template_in_window(work, str(template_path)):
-                raise RuntimeError("로드뷰 버튼 이미지가 발견되지 않아 클릭하지 않았습니다.")
-        finally:
-            self.show_panel.emit()
-        APP_LOG.info("로드뷰 버튼 클릭 완료")
-        time.sleep(float(self.config.get("capture", {}).get("settle_seconds", 1.5)))
 
     def run(self) -> None:
         try:
@@ -143,17 +127,10 @@ class ControlWorker(QThread):
 
             if not re.fullmatch(r"[A-Za-z0-9 _-]+", self.case_id):
                 raise ValueError("작업 ID는 영문/숫자/공백/-/_만 사용할 수 있습니다.")
-            if self.action not in {"open", "capture", "analyze"}:
+            if self.action not in {"capture", "analyze"}:
                 raise ValueError("지원하지 않는 작업입니다.")
             if self.movement not in {"none", "forward", "backward"}:
                 raise ValueError("지원하지 않는 로드뷰 이동입니다.")
-            if self.action == "open":
-                self._open_roadview()
-                self.result_ready.emit({"message": "로드뷰 버튼을 클릭했습니다."})
-                return
-
-            if self.open_first and self.action != "capture":
-                self._open_roadview()
             self._check_stop()
 
             if self.action == "capture":
