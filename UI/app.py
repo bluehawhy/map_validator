@@ -15,6 +15,7 @@ from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -256,6 +257,14 @@ class MainWindow(QMainWindow):
         basic_grid.setColumnStretch(1, 1)
         layout.addLayout(basic_grid)
 
+        self.review_monitor_toggle = QCheckBox("교차로 선택 자동 감시")
+        self.review_monitor_toggle.setChecked(True)
+        self.review_monitor_toggle.setToolTip(
+            "끄면 전역 마우스 후크를 해제합니다. 검수 ID는 자동 갱신되지 않습니다."
+        )
+        self.review_monitor_toggle.toggled.connect(self._toggle_review_monitor)
+        layout.addWidget(self.review_monitor_toggle)
+
         for field in (self.work_input, self.view_input):
             field.editingFinished.connect(self._save_settings)
 
@@ -492,14 +501,31 @@ class MainWindow(QMainWindow):
             "intersection_review_title", ""
         ).strip()
         if not review_title:
+            self.review_monitor_toggle.setEnabled(False)
+            self._log("선택 감시 사용 불가: 교차로 선형 검수 창 제목이 없습니다.")
             return
         self.review_monitor = ReviewSelectionMonitor(review_title, self)
         self.review_monitor.selection_changed.connect(self._on_review_selection)
         self.review_monitor.finished.connect(self._on_review_monitor_finished)
         self.review_monitor.start()
 
+    def _toggle_review_monitor(self, enabled: bool) -> None:
+        # A stale ID must not silently be used after the selection changes.
+        self.case_input.clear()
+        if enabled:
+            self._log("교차로 선택 감시 켜기 요청")
+            self._start_review_monitor()
+        else:
+            self._log("교차로 선택 감시 끄기 요청 · 후크 해제 중")
+            if self.review_monitor is not None and self.review_monitor.isRunning():
+                self.review_monitor_toggle.setEnabled(False)
+                self.review_monitor.set_paused(True)
+                self.review_monitor.requestInterruption()
+            else:
+                self._log("교차로 선택 감시 꺼짐 · 검수 ID 자동 갱신 중지")
+
     def _on_review_selection(self, review_id: str) -> None:
-        if self._close_pending or (
+        if not self.review_monitor_toggle.isChecked() or self._close_pending or (
             self.worker is not None and self.worker.isRunning()
         ):
             return
@@ -512,6 +538,22 @@ class MainWindow(QMainWindow):
     def _on_review_monitor_finished(self) -> None:
         if self._close_pending:
             QTimer.singleShot(0, self.close)
+            return
+        monitor = self.review_monitor
+        self.review_monitor = None
+        if monitor is not None:
+            monitor.deleteLater()
+        if self.review_monitor_toggle.isChecked():
+            self.review_monitor_toggle.blockSignals(True)
+            self.review_monitor_toggle.setChecked(False)
+            self.review_monitor_toggle.blockSignals(False)
+            self.case_input.clear()
+            self._log("선택 감시가 종료되어 자동 갱신을 껐습니다.", logging.WARNING)
+        else:
+            self._log("교차로 선택 감시 꺼짐 · 후크 해제 결과는 위 로그 확인")
+        self.review_monitor_toggle.setEnabled(
+            self.worker is None or not self.worker.isRunning()
+        )
 
     def _on_analysis_case_id(self, case_id: str) -> None:
         self.case_input.setText(case_id)
@@ -648,12 +690,14 @@ class MainWindow(QMainWindow):
             self.stop_line_threshold,
             self.case_input, self.work_input, self.view_input,
             self.work_select_btn, self.view_select_btn, self.window_info_btn,
-            self.output_input,
+            self.output_input, self.review_monitor_toggle,
         ):
             widget.setEnabled(not busy)
         self.stop_btn.setEnabled(busy)
         if self.review_monitor is not None:
             self.review_monitor.set_paused(busy)
+            if not busy and self.review_monitor.isInterruptionRequested():
+                self.review_monitor_toggle.setEnabled(False)
 
     def _restore_panel(self) -> None:
         if not self.isVisible():
