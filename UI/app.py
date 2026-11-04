@@ -330,7 +330,6 @@ class MainWindow(QMainWindow):
 
             target = windows[0]
             self._save_settings()
-            self.showMinimized()
             if target.isMinimized:
                 target.restore()
             target.activate()
