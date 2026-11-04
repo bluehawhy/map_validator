@@ -12,6 +12,9 @@ import threading
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from map_validator.app_logging import log_exception_at_source
+from map_validator.com_threading import sta_com_apartment
+
 APP_LOG = logging.getLogger("map_validator.ui.review_monitor")
 
 
@@ -34,6 +37,13 @@ class ReviewSelectionMonitor(QThread):
             self._paused.clear()
 
     def run(self) -> None:
+        try:
+            with sta_com_apartment():
+                self._poll_selection()
+        except Exception as exc:
+            log_exception_at_source(APP_LOG, "교차로 선택 감시 스레드 오류", exc)
+
+    def _poll_selection(self) -> None:
         # Both imports and Windows automation run on this dedicated thread.
         import pygetwindow as gw
         from map_validator.windows import read_selected_intersection_id
