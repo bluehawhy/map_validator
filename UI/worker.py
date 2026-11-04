@@ -144,6 +144,7 @@ class ControlWorker(QThread):
                     output=folder,
                     case_id=self.case_id,
                     roadview_title=self.config["windows"]["roadview_title"],
+                    work_title=self.config["windows"]["work_title"],
                     analysis_settings=self.config.get("analysis", {}),
                     progress=self._progress,
                     check_stop=self._check_stop,
