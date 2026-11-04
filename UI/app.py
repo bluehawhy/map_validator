@@ -431,10 +431,23 @@ class MainWindow(QMainWindow):
         if self.worker is not None and self.worker.isRunning():
             return
         try:
-            case_id = self.case_input.text().strip()
+            cfg = self._current_settings()
+            if action != "open":
+                review_title = cfg["windows"].get("intersection_review_title", "").strip()
+                if not review_title:
+                    raise ValueError("config.yaml에 입력 교차로 타이틀을 설정하세요.")
+                from map_validator.windows import read_selected_intersection_id
+
+                case_id = read_selected_intersection_id(review_title)
+                self.case_input.setText(case_id)
+                self._save_settings()
+                cfg = self._current_settings()
+                self._log(f"선택 교차로 검수 ID: {case_id}")
+            else:
+                case_id = self.case_input.text().strip()
+
             if not case_id:
                 raise ValueError("검수 ID를 입력하세요.")
-            cfg = self._current_settings()
             if not cfg["windows"]["roadview_title"].strip() and action != "open":
                 raise ValueError("로드뷰 창 제목을 입력하세요.")
             if not cfg["windows"]["work_title"].strip() and (
