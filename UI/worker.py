@@ -117,9 +117,11 @@ class ControlWorker(QThread):
 
     def _run_job(self) -> None:
         try:
-            if self.action == "analyze":
-                # UIA/Win32 tree inspection can block for seconds. Never run it
-                # in MainWindow._start() on the GUI event loop.
+            if self.action == "analyze" or (
+                self.action == "capture" and not self.case_id.strip()
+            ):
+                # UIA/Win32 inspection is always performed on the worker
+                # thread; an empty capture ID must never block the GUI.
                 self._progress("선택 교차로 검수 ID 확인 중")
                 self._check_stop()
                 from map_validator.windows import read_selected_intersection_id
@@ -129,7 +131,13 @@ class ControlWorker(QThread):
                 ).strip()
                 if not review_title:
                     raise ValueError("config.yaml에 입력 교차로 타이틀을 설정하세요.")
-                self.case_id = read_selected_intersection_id(review_title)
+                try:
+                    self.case_id = read_selected_intersection_id(review_title)
+                except Exception as exc:
+                    raise RuntimeError(
+                        "검수 ID를 읽지 못했습니다. 교차로 선형 검수에서 "
+                        "Polygon 또는 Link를 선택한 뒤 다시 시도하세요."
+                    ) from exc
                 self._check_stop()
                 self.case_id_ready.emit(self.case_id)
                 APP_LOG.info("선택 교차로 검수 ID: %s", self.case_id)
