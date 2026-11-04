@@ -12,6 +12,7 @@ import cv2
 import yaml
 
 from .road_analysis import RoadSegmenter, analyze_road_mask, draw_review_overlay
+from .capture_naming import capture_file_name
 
 
 def arguments() -> argparse.Namespace:
@@ -48,6 +49,7 @@ def main() -> int:
         time.sleep(float(cfg.get("capture", {}).get("settle_seconds", 1.5)))
 
     roadview = find_window(windows_cfg["roadview_title"])
+    work = find_window(windows_cfg["work_title"])
     cap_cfg = cfg.get("capture", {})
     output = based_path(cfg.get("output", {}).get("directory", "results")) / args.case_id
     output.mkdir(parents=True, exist_ok=True)
@@ -63,19 +65,37 @@ def main() -> int:
             move_roadview(roadview, key, float(movement.get("hold_seconds", 0.5)))
             time.sleep(float(cap_cfg.get("settle_seconds", 1.5)))
         img = capture_window(roadview, cap_cfg.get("region"))
-        base = output / f"frame_{idx:02d}"
-        cv2.imwrite(str(base) + ".png", img)
-        row = {"frame": idx, "image": base.name + ".png", "left_candidate": None, "right_candidate": None}
+        roadview_path = output / capture_file_name(
+            args.case_id, windows_cfg["roadview_title"], idx, step_count + 1,
+        )
+        if not cv2.imwrite(str(roadview_path), img):
+            raise RuntimeError(f"로드뷰 스크린샷 저장 실패: {roadview_path}")
+        work_img = capture_window(work)
+        work_path = output / capture_file_name(
+            args.case_id, windows_cfg["work_title"], idx, step_count + 1,
+        )
+        if not cv2.imwrite(str(work_path), work_img):
+            raise RuntimeError(f"입력도구 스크린샷 저장 실패: {work_path}")
+        row = {
+            "frame": idx,
+            "image": roadview_path.name,
+            "roadview_image": roadview_path.name,
+            "work_image": work_path.name,
+            "left_candidate": None,
+            "right_candidate": None,
+        }
         if segmenter is not None:
             mask = segmenter.mask(img)
             vr = tuple(ai_cfg.get("vertical_range", [0.28, 0.60]))
             result = analyze_road_mask(mask, float(ai_cfg.get("side_road_score_threshold", 0.19)), vr)
             overlay = draw_review_overlay(img, mask, result, vr)
-            cv2.imwrite(str(base) + "_overlay.png", overlay)
+            overlay_path = roadview_path.with_name(roadview_path.stem + "_overlay.png")
+            if not cv2.imwrite(str(overlay_path), overlay):
+                raise RuntimeError(f"분석 이미지 저장 실패: {overlay_path}")
             row.update(result.as_dict())
-            row["overlay"] = base.name + "_overlay.png"
+            row["overlay"] = overlay_path.name
         frames.append(row)
-        print(f"Captured {idx+1}/{step_count+1}: {base}.png")
+        print(f"Captured {idx+1}/{step_count+1}: {roadview_path.name}, {work_path.name}")
 
     def candidate_summary(key: str) -> str:
         if segmenter is None:
