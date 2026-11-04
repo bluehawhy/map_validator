@@ -18,7 +18,6 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -324,7 +323,10 @@ class MainWindow(QMainWindow):
         try:
             import pygetwindow as gw
 
-            current = field.text().strip()
+            configured = self._program_title(field.text())
+            if not configured:
+                raise ValueError(f"{label} 프로그램명을 먼저 입력하세요.")
+
             windows = [
                 window for window in gw.getAllWindows()
                 if window.title.strip()
@@ -332,31 +334,18 @@ class MainWindow(QMainWindow):
                 and window.width > 150
                 and window.height > 150
             ]
-            if not windows:
-                raise RuntimeError("선택할 수 있는 실행 중인 창이 없습니다.")
+            matches = [
+                window for window in windows
+                if configured.casefold() == self._program_title(window.title).casefold()
+                or configured.casefold() in window.title.casefold()
+            ]
+            if not matches:
+                raise RuntimeError(
+                    f"실행 중인 {label} 창을 찾지 못했습니다: {configured}"
+                )
 
-            choices: dict[str, object] = {}
-            for window in windows:
-                program_title = self._program_title(window.title)
-                if program_title and program_title not in choices:
-                    choices[program_title] = window
-
-            titles = sorted(choices, key=str.casefold)
-            current_program = self._program_title(current)
-            current_index = titles.index(current_program) if current_program in titles else 0
-            selected, accepted = QInputDialog.getItem(
-                self,
-                f"{label} 선택",
-                "실행 중인 프로그램:",
-                titles,
-                current_index,
-                False,
-            )
-            if not accepted or not selected:
-                return
-
-            target = choices[selected]
-            field.setText(selected)
+            target = matches[0]
+            field.setText(configured)
             self._save_settings()
             if target.isMinimized:
                 target.restore()
