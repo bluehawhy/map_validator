@@ -28,6 +28,7 @@ ENV/
 .direnv/
 config.yaml
 config.local.yaml
+config.backups/
 
 # Builds and generated artifacts
 build/
