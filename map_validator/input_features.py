@@ -8,7 +8,8 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from .line_geometry import _canvas, extract_line_geometry
+from .line_geometry import extract_line_geometry
+from .stop_line import detect_input_stop_line
 from .stage_types import fields_for_stage
 
 
@@ -21,46 +22,6 @@ def candidate(value, method: str, reason: str, confidence: float) -> dict:
         "value": value, "confidence": round(float(confidence), 3),
         "method": method, "reason": reason,
     }
-
-
-def _cyan_stop_line(image: np.ndarray, overlay: np.ndarray) -> dict:
-    """Identify clear cyan horizontal segments; no segment != confirmed absent."""
-    height, width = image.shape[:2]
-    top, bottom = _canvas(image)
-    hsv = cv2.cvtColor(image[top:bottom], cv2.COLOR_BGR2HSV)
-    cyan = cv2.inRange(hsv, (78, 105, 125), (101, 255, 255))
-    lines = cv2.HoughLinesP(
-        cyan, 1, np.pi / 180, threshold=max(18, width // 38),
-        minLineLength=max(27, int(width * .065)), maxLineGap=8,
-    )
-    if lines is None:
-        return unknown("입력툴의 시안색 가로 정지선 후보가 명확하게 확인되지 않았습니다.")
-
-    horizontal = []
-    for line in lines[:, 0]:
-        x1, y1, x2, y2 = map(int, line)
-        dx, dy = abs(x2 - x1), abs(y2 - y1)
-        if dx < max(27, width * .065) or dy > max(4, dx * .18):
-            continue
-        # Avoid HUD/toolbars and extreme margins of the map viewport.
-        cy = (y1 + y2) / 2 + top
-        if cy < top + (bottom - top) * .18 or cy > bottom - (bottom - top) * .10:
-            continue
-        horizontal.append((dx, (x1, y1 + top), (x2, y2 + top)))
-    if not horizontal:
-        return unknown("시안색 선형은 보이나 명확한 가로 정지선 후보는 아닙니다.")
-
-    longest = max(horizontal, key=lambda item: item[0])
-    cv2.line(overlay, longest[1], longest[2], (20, 20, 255), 3)
-    cv2.putText(
-        overlay, "STOP LINE? REVIEW", (longest[1][0], max(20, longest[1][1] - 12)),
-        cv2.FONT_HERSHEY_SIMPLEX, .48, (20, 20, 255), 2, cv2.LINE_AA,
-    )
-    return candidate(
-        True, "cyan_horizontal_hough_candidate",
-        "시안색 가로선 후보를 검출했습니다. 진입 선형 또는 다른 선과 구별해 직접 확인해야 합니다.",
-        .50,
-    )
 
 
 def extract_input_features(image: np.ndarray, stage: str) -> tuple[dict, np.ndarray, dict]:
@@ -76,7 +37,7 @@ def extract_input_features(image: np.ndarray, stage: str) -> tuple[dict, np.ndar
     route = {"status": "unknown", "expected_turn": "unknown"}
 
     if stage == "before":
-        features["stop_line"] = _cyan_stop_line(image, overlay)
+        features["stop_line"] = detect_input_stop_line(image, overlay)
         features["entry_lane_count"] = unknown(
             "진입 차로 수는 도로 경계선·차로 구분 데이터를 확보하기 전까지 임의 산출하지 않습니다."
         )
