@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QScrollArea,
     QFrame,
+    QDoubleSpinBox,
     QPushButton,
     QSlider,
     QTextEdit,
@@ -316,6 +317,28 @@ class MainWindow(QMainWindow):
             self.stage_buttons[stage] = button
             self.stage_status_labels[stage] = status
 
+        threshold_row = QHBoxLayout()
+        threshold_row.addWidget(self._label("로드뷰 정지선 threshold", "hint"))
+        self.stop_line_threshold = QDoubleSpinBox()
+        self.stop_line_threshold.setRange(0.35, 0.95)
+        self.stop_line_threshold.setSingleStep(0.05)
+        self.stop_line_threshold.setDecimals(2)
+        self.stop_line_threshold.setValue(
+            max(0.35, min(0.95, float(
+                self.cfg.get("analysis", {}).get("stop_line_roadview_threshold", 0.68)
+            )))
+        )
+        self.stop_line_threshold.setToolTip(
+            "로드뷰 단독 흰색 정지선의 최소 검출 신뢰도. "
+            "높일수록 엄격하게 판정하며 횡단보도는 정지선에서 제외합니다."
+        )
+        self.stop_line_threshold.valueChanged.connect(
+            lambda _value: self._save_settings()
+        )
+        threshold_row.addWidget(self.stop_line_threshold)
+        threshold_row.addStretch(1)
+        sections.addLayout(threshold_row)
+
         actions = QHBoxLayout()
         self.start_btn = QPushButton("촬영본 분석")
         self.start_btn.setObjectName("primary")
@@ -499,6 +522,10 @@ class MainWindow(QMainWindow):
         cfg.setdefault("windows", {})
         cfg.setdefault("output", {})
         cfg.setdefault("ui", {})
+        cfg.setdefault("analysis", {})
+        cfg["analysis"]["stop_line_roadview_threshold"] = round(
+            self.stop_line_threshold.value(), 2
+        )
         cfg["windows"]["work_title"] = self.work_input.text().strip()
         cfg["windows"]["roadview_title"] = self.view_input.text().strip()
         cfg["output"]["directory"] = self.output_input.text().strip() or "results"
@@ -619,6 +646,7 @@ class MainWindow(QMainWindow):
     def _busy(self, busy: bool) -> None:
         for widget in (
             *self.stage_buttons.values(), self.start_btn, self.save_btn,
+            self.stop_line_threshold,
             self.case_input, self.work_input, self.view_input,
             self.work_select_btn, self.view_select_btn, self.window_info_btn,
             self.output_input,
@@ -724,11 +752,20 @@ class MainWindow(QMainWindow):
                 for field, comparison in item.get("comparison", {}).items():
                     exp = self._format_feature(comparison.get("expected_value"))
                     obs = self._format_feature(comparison.get("observed_value"))
-                    verdict = labels.get(comparison.get("status"), "확인 필요")
+                    if field == "stop_line":
+                        verdict = {
+                            "PASS": "PASS",
+                            "FAIL": "FAIL",
+                            "REVIEW": "검수 필요",
+                        }.get(comparison.get("verdict"), "검수 필요")
+                    else:
+                        verdict = labels.get(comparison.get("status"), "확인 필요")
                     lines.append(
                         f"  {FIELD_LABELS[field]}: 입력툴 {exp} / 로드뷰 {obs}"
                         f"  → {verdict}"
                     )
+                    if field == "stop_line" and comparison.get("verdict") == "REVIEW":
+                        lines.append("    횡단보도와 구분이 어려우면 직접 확인하세요.")
                     if comparison.get("status") == "mismatch_review":
                         lines.append("    " + comparison.get("reason", ""))
             self.analysis_details.setPlainText("\n".join(lines))
