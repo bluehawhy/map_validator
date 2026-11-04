@@ -17,6 +17,11 @@ import numpy as np
 from .input_features import extract_input_features
 from .road_analysis import RoadSegmenter
 from .roadview_features import extract_roadview_features
+from .road_scores import (
+    assemble_score_record,
+    save_score_record,
+    score_road_mask,
+)
 from .stage_types import FIELD_LABELS, STAGES, STAGE_LABELS, fields_for_stage
 from .staged_capture import read_manifest, stage_status, stored_image
 
@@ -128,6 +133,9 @@ def analyze_stages(
         input_expected, input_overlay, route = extract_input_features(input_image, stage)
         check_stop()
         masks = segmenter.class_masks(road_image)
+        # One segmentation pass supplies BOTH the qualitative detector and
+        # the six-number, future-comparable road-pixel score dataset.
+        score_observation = score_road_mask(masks["road"])
         roadview_observed, road_overlay, evidence = extract_roadview_features(
             road_image, stage, masks
         )
@@ -161,6 +169,13 @@ def analyze_stages(
             "comparison": compare,
             "route_candidate": route,
             "roadview_semantic_evidence": evidence,
+            "roadview_scores": score_observation["scores"],
+            "roadview_score_details": {
+                "method": score_observation["method"],
+                "pixels": score_observation["pixels"],
+                "vertical_range": score_observation["vertical_range"],
+                "horizontal_regions": score_observation["horizontal_regions"],
+            },
             "evidence": {
                 "input_image": input_path.relative_to(folder).as_posix(),
                 "roadview_image": road_path.relative_to(folder).as_posix(),
@@ -188,9 +203,24 @@ def analyze_stages(
             "사진의 방향, 실제 연결 관계 및 최종 판정은 사용자가 확인해야 합니다."
         ),
     }
+    check_stop()
+    scores = assemble_score_record(
+        case_id=case_id,
+        model_name=model_name,
+        stages=report["stages"],
+        analyzed_at_utc=report["analyzed_at_utc"],
+    )
+    report["road_scores"] = scores
     _atomic_report(folder / "staged_analysis.json", report)
+    check_stop()
+    score_files = save_score_record(folder, scores)
+    progress(
+        f"교차로 스코어 {scores['available_scores']}/6개 저장 · "
+        f"전체 CSV: {score_files['all_cases_csv']}"
+    )
     progress(f"4단계 검수 결과 저장 완료: {assessed}/4단계 · {overall}")
     return {
         "kind": "staged_analysis", "folder": str(folder), "case_id": case_id,
         "stages": report["stages"], "summary": report["summary"],
+        "road_scores": scores, "score_files": score_files,
     }
