@@ -4,6 +4,10 @@ windows:
   roadview_title: "로드뷰"
   open_button_image: "assets/open_roadview.png"
 
+preparation:
+  input_zoom: 50
+  roadview_scroll_to_bottom: true
+
 capture:
   # 창 기준 [left, top, width, height]. null이면 창 전체 캡처
   region: null
