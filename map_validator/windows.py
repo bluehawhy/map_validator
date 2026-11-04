@@ -386,8 +386,15 @@ def read_selected_intersection_id(title_keyword: str) -> str:
             handles.append(handle)
 
     if handles:
-        # A Win32 top-level dialog may be absent from Desktop("uia").windows()
-        # yet directly reachable through its HWND.
+        # Native SysTreeView32 lookup is significantly cheaper than a full
+        # UI Automation descendants() scan and never changes window focus.
+        for handle in handles:
+            result = _read_win32_intersection(handle)
+            if result:
+                return result
+
+        # Custom-drawn review trees may not expose a native TreeView.
+        # Use the slower UIA path only when the fast native lookup fails.
         for handle in handles:
             try:
                 wrapper = Desktop(backend="uia").window(handle=handle).wrapper_object()
@@ -396,11 +403,6 @@ def read_selected_intersection_id(title_keyword: str) -> str:
                     return result
             except Exception:
                 pass
-
-        for handle in handles:
-            result = _read_win32_intersection(handle)
-            if result:
-                return result
     else:
         # Only use the expensive desktop UIA enumeration for dialogs that
         # Win32 cannot see at all.
