@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 
 import cv2
-import mss
 import numpy as np
 import pyautogui
 import pygetwindow as gw
@@ -61,21 +60,10 @@ def activate(window) -> None:
 
 
 def capture_window(window, region: list[int] | None = None) -> np.ndarray:
-    """Returns BGR pixels. Window must be visible and not occluded."""
-    activate(window)
-    left, top = int(window.left), int(window.top)
-    width, height = int(window.width), int(window.height)
-    if region is not None:
-        if len(region) != 4:
-            raise ValueError("capture.region must be [left, top, width, height]")
-        dx, dy, rw, rh = (int(x) for x in region)
-        left, top = left + dx, top + dy
-        width, height = rw, rh
-    if width <= 0 or height <= 0:
-        raise ValueError("Capture region has non-positive size")
-    with mss.mss() as screenshot:
-        raw = np.array(screenshot.grab({"left": left, "top": top, "width": width, "height": height}))
-    return cv2.cvtColor(raw, cv2.COLOR_BGRA2BGR)
+    """Read window pixels from HWND without activating or exposing Chrome."""
+    from .window_capture import capture_window_background
+
+    return capture_window_background(window, region)
 
 
 def move_roadview(window, key: str, duration_seconds: float) -> None:
@@ -95,6 +83,9 @@ def click_template_in_window(window, template_path: str, threshold: float = 0.88
     path = Path(template_path)
     if not path.is_file():
         raise FileNotFoundError(f"Template image missing: {path}")
+    # The template click still requires the work app to be foreground;
+    # passive window capture by itself must not steal focus.
+    activate(window)
     image = capture_window(window)
     template = cv2.imread(str(path), cv2.IMREAD_COLOR)
     if template is None:
