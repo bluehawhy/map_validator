@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from .input_features import candidate, unknown
+from .stop_line import detect_roadview_stop_line
 from .stage_types import fields_for_stage
 
 
@@ -48,36 +49,6 @@ def _forward_presence(road: np.ndarray, building: np.ndarray) -> dict:
     return result
 
 
-def _stop_line_candidate(image: np.ndarray) -> tuple[dict, tuple | None]:
-    h, w = image.shape[:2]
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    # Bright, unsaturated white paint. A crossing can look similar; do not
-    # infer absence simply because the camera cannot see the stop line.
-    white = cv2.inRange(hsv, (0, 0, 180), (179, 66, 255))
-    crop = white[int(h * .42):int(h * .89), int(w * .12):int(w * .88)]
-    lines = cv2.HoughLinesP(
-        crop, 1, np.pi / 180, threshold=max(28, w // 30),
-        minLineLength=max(50, int(w * .22)), maxLineGap=9,
-    )
-    found = []
-    if lines is not None:
-        for x1, y1, x2, y2 in lines[:, 0]:
-            dx = abs(int(x2) - int(x1))
-            dy = abs(int(y2) - int(y1))
-            if dx >= w * .22 and dy <= max(7, dx * .16):
-                xoff, yoff = int(w * .12), int(h * .42)
-                found.append((dx, (int(x1) + xoff, int(y1) + yoff),
-                              (int(x2) + xoff, int(y2) + yoff)))
-    if not found:
-        return unknown("뚜렷한 흰색 가로 정지선 후보가 확인되지 않습니다."), None
-    _, a, b = max(found, key=lambda item: item[0])
-    return candidate(
-        True, "white_horizontal_marking_candidate",
-        "흰색 가로 노면표시 후보입니다. 횡단보도/차선과 혼동 가능하므로 확인하세요.",
-        .49
-    ), (a, b)
-
-
 def _painted_color_candidate(image: np.ndarray) -> tuple[dict, list]:
     h, w = image.shape[:2]
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
@@ -106,6 +77,7 @@ def _painted_color_candidate(image: np.ndarray) -> tuple[dict, list]:
 
 def extract_roadview_features(
     image: np.ndarray, stage: str, masks: dict[str, np.ndarray],
+    stop_line_threshold: float = .68,
 ) -> tuple[dict, np.ndarray, dict]:
     """Return field-value evidence, overlay and pixel-ratio metadata."""
     road = masks.get("road")
@@ -128,10 +100,10 @@ def extract_roadview_features(
             "building_ratio": round(float(np.mean(building)), 4)}
 
     if stage == "before":
-        stop, line = _stop_line_candidate(image)
-        result["stop_line"] = stop
-        if line:
-            cv2.line(overlay, line[0], line[1], (0, 255, 255), 3)
+        result["stop_line"] = detect_roadview_stop_line(
+            image, road, overlay, threshold=stop_line_threshold
+        )
+        meta["stop_line_threshold"] = stop_line_threshold
         result["entry_lane_count"] = unknown(
             "현재 SegFormer 도로 영역만으로 차로 경계 개수는 계산하지 않습니다."
         )
