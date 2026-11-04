@@ -21,6 +21,7 @@ map_validator/
 │   ├── staged_capture.py        # 단계별 사진 쌍·재촬영 버전·manifest
 │   ├── input_features.py        # HD_3D Tool의 기대값 후보
 │   ├── roadview_features.py     # 도로/건물 및 노면표시 후보
+│   ├── stop_line.py             # 시안색 가로 정지선 / 단독 흰색 정지선 비교 근거
 │   ├── road_scores.py           # 진입 전·후 여섯 방향 도로 점수와 JSON/CSV
 │   ├── staged_compare.py        # 4단계 비교·근거 이미지·JSON
 │   └── wgc_capture.py           # 두 창 공용 비활성 캡처
@@ -69,6 +70,7 @@ map_validator/
 | 단계별 촬영 상태·이미지 쌍 이력 | `map_validator/stage_types.py`, `staged_capture.py` |
 | 입력툴 기대값(정지선·색상 선형) | `map_validator/input_features.py` |
 | 로드뷰 실제 관측(도로·건물 등) | `map_validator/roadview_features.py` |
+| 진입 전 정지선 검출(시안색/흰색), 횡단보도 구분, threshold | `map_validator/stop_line.py` |
 | 4단계 검수 비교/보고서 | `map_validator/staged_compare.py` |
 | 진입 전 좌/직/우 + 진입 후 좌/직/우 정면 점수 계산·저장 | `map_validator/road_scores.py` |
 | 두 프로그램 비활성 캡처 | `map_validator/wgc_capture.py` |
