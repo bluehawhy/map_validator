@@ -15,6 +15,7 @@ import cv2
 from PyQt6.QtCore import QThread, pyqtSignal
 from map_validator.app_logging import log_exception_at_source
 from map_validator.com_threading import sta_com_apartment
+from map_validator.capture_naming import capture_file_name
 
 import logging
 
@@ -172,6 +173,7 @@ class ControlWorker(QThread):
                 finally:
                     self.show_panel.emit()
 
+            work = find_window(self.config["windows"]["work_title"])
             cap = self.config.get("capture", {})
             movement_cfg = self.config["movement"]
             max_steps = int(movement_cfg.get("max_steps", 5))
@@ -206,12 +208,29 @@ class ControlWorker(QThread):
                     finally:
                         self.show_panel.emit()
                 frame = capture_window(roadview, cap.get("region"))
-                image_path = output / f"frame_{idx:02d}.png"
-                if not cv2.imwrite(str(image_path), frame):
-                    raise RuntimeError(f"스크린샷 저장 실패: {image_path}")
+                roadview_name = capture_file_name(
+                    self.case_id, self.config["windows"]["roadview_title"],
+                    idx, count + 1,
+                )
+                roadview_path = output / roadview_name
+                if not cv2.imwrite(str(roadview_path), frame):
+                    raise RuntimeError(f"로드뷰 스크린샷 저장 실패: {roadview_path}")
+
+                # A separate PrintWindow capture: no foreground activation.
+                work_frame = capture_window(work)
+                work_name = capture_file_name(
+                    self.case_id, self.config["windows"]["work_title"],
+                    idx, count + 1,
+                )
+                work_path = output / work_name
+                if not cv2.imwrite(str(work_path), work_frame):
+                    raise RuntimeError(f"입력도구 스크린샷 저장 실패: {work_path}")
+
                 entry = {
                     "frame": idx,
-                    "image": image_path.name,
+                    "image": roadview_path.name,
+                    "roadview_image": roadview_path.name,
+                    "work_image": work_path.name,
                     "left_candidate": None,
                     "right_candidate": None,
                 }
@@ -226,13 +245,16 @@ class ControlWorker(QThread):
                         vertical_range,
                     )
                     overlay = draw_review_overlay(frame, mask, direction, vertical_range)
-                    overlay_path = output / f"frame_{idx:02d}_overlay.png"
+                    overlay_path = output / roadview_name.replace(".png", "_overlay.png")
                     if not cv2.imwrite(str(overlay_path), overlay):
                         raise RuntimeError(f"분석 이미지 저장 실패: {overlay_path}")
                     entry.update(direction.as_dict())
                     entry["overlay"] = overlay_path.name
                 frames.append(entry)
-                APP_LOG.info(f"{idx + 1}번째 화면 저장: {image_path.name}")
+                APP_LOG.info(
+                    "%d번째 화면 저장: %s, %s",
+                    idx + 1, roadview_path.name, work_path.name,
+                )
 
             def summary(direction: str) -> str:
                 if segmenter is None:
