@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -10,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -29,6 +30,33 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from map_validator.app_logging import (
+    AppLogFormatter,
+    configure_app_logging,
+    log_exception_at_source,
+)
+
+APP_LOG = configure_app_logging()
+
+
+class _UILogRelay(QObject):
+    line_ready = pyqtSignal(str)
+
+
+class _UILogHandler(logging.Handler):
+    """Forward records to the UI without directly updating Qt from worker threads."""
+
+    def __init__(self, relay: _UILogRelay) -> None:
+        super().__init__()
+        self.relay = relay
+        self.setFormatter(AppLogFormatter())
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self.relay.line_ready.emit(self.format(record))
+        except Exception:
+            self.handleError(record)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "config.yaml"
@@ -307,6 +335,10 @@ class MainWindow(QMainWindow):
         self.logs.setReadOnly(True)
         self.logs.setMinimumHeight(100)
         layout.addWidget(self.logs, 1)
+        self._log_relay = _UILogRelay(self)
+        self._log_relay.line_ready.connect(self._append_log_line)
+        self._log_handler = _UILogHandler(self._log_relay)
+        APP_LOG.addHandler(self._log_handler)
 
         footer = QHBoxLayout()
         self.save_btn = QPushButton("설정 저장")
@@ -386,7 +418,7 @@ class MainWindow(QMainWindow):
                 target.restore()
             target.activate()
         except Exception as exc:
-            self._log(f"{label} 선택 실패: {exc}")
+            log_exception_at_source(APP_LOG, f"{label} 선택 실패", exc)
 
     def _select_template(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -478,7 +510,7 @@ class MainWindow(QMainWindow):
             self.cfg = cfg
             self._log("로컬 config.yaml 저장 완료 (기존 파일은 config.backups에 백업)")
         except Exception as exc:
-            self._log(f"설정 저장 실패: {exc}")
+            log_exception_at_source(APP_LOG, "설정 저장 실패", exc)
 
     def _start(self, action: str) -> None:
         if self.worker is not None and self.worker.isRunning():
@@ -518,7 +550,6 @@ class MainWindow(QMainWindow):
                 open_first=self.open_first.isChecked() if action != "open" else False,
                 parent=self,
             )
-            self.worker.message.connect(self._log)
             self.worker.progress.connect(self.status_label.setText)
             self.worker.result_ready.connect(self._show_result)
             self.worker.hide_panel.connect(self._hide_for_capture)
@@ -531,7 +562,7 @@ class MainWindow(QMainWindow):
             self._log(f"시작: {action} / {case_id}")
             self.worker.start()
         except Exception as exc:
-            self._log(f"시작 실패: {exc}")
+            log_exception_at_source(APP_LOG, "시작 실패", exc)
 
     def _busy(self, busy: bool) -> None:
         for widget in (
@@ -591,9 +622,11 @@ class MainWindow(QMainWindow):
             else:
                 self._log("결과 폴더 열기는 Windows에서 지원합니다.")
 
-    def _log(self, text: str) -> None:
-        stamp = datetime.now().strftime("%H:%M:%S")
-        self.logs.append(f"[{stamp}] {text}")
+    def _log(self, text: str, level: int = logging.INFO) -> None:
+        APP_LOG.log(level, text, stacklevel=2)
+
+    def _append_log_line(self, text: str) -> None:
+        self.logs.append(text)
         bar = self.logs.verticalScrollBar()
         bar.setValue(bar.maximum())
 
