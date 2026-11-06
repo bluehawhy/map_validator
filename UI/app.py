@@ -267,8 +267,10 @@ class MainWindow(QMainWindow):
         basic_grid.addWidget(self.case_input, 2, 1)
         self.review_select_btn = QPushButton("선택")
         self.review_select_btn.setObjectName("select_button")
-        self.review_select_btn.setToolTip("교차로 선형 검수 창을 앞으로 가져옵니다.")
-        self.review_select_btn.clicked.connect(self._show_review_window)
+        self.review_select_btn.setToolTip(
+            "교차로 선형 검수 창에서 현재 선택한 Polygon/Link ID를 읽습니다."
+        )
+        self.review_select_btn.clicked.connect(self._refresh_review_selection)
         basic_grid.addWidget(self.review_select_btn, 2, 2)
         basic_grid.setColumnStretch(1, 1)
         layout.addLayout(basic_grid)
@@ -581,35 +583,30 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             log_exception_at_source(APP_LOG, f"{label} 선택 실패", exc)
 
-    def _show_review_window(self) -> None:
-        """Bring the configured intersection review window to the foreground.
+    def _refresh_review_selection(self) -> None:
+        """Read the current Polygon/Link selection without changing window focus."""
+        monitor = self.review_monitor
+        if monitor is None or not monitor.request_selection_refresh():
+            self._log(
+                "검수 ID 수동 조회 불가: 선택 감시가 실행 중이 아니거나 다른 작업 중입니다.",
+                logging.WARNING,
+            )
+            return
+        self.review_select_btn.setEnabled(False)
 
-        This only changes focus; it does not alter the current case ID,
-        config.yaml, or the target application's window geometry.
-        """
-        try:
-            import pygetwindow as gw
+    def _on_manual_review_selection(self, review_id: str) -> None:
+        if self._close_pending or (
+            self.worker is not None and self.worker.isRunning()
+        ):
+            return
+        self.case_input.setText(review_id)
+        self._log(f"검수 ID 수동 조회 완료: {review_id}")
 
-            title = self.cfg.get("windows", {}).get(
-                "intersection_review_title", "교차로 선형 검수"
-            ).strip() or "교차로 선형 검수"
-            windows = [
-                window for window in gw.getAllWindows()
-                if window.title.strip() and window.title != self.windowTitle()
-            ]
-            exact = [window for window in windows if window.title.strip() == title]
-            matches = exact or [
-                window for window in windows if title in window.title
-            ]
-            if not matches:
-                raise RuntimeError(f"실행 중인 교차로 검수 창을 찾지 못했습니다: {title}")
-            target = matches[0]
-            if target.isMinimized:
-                target.restore()
-            target.activate()
-            self._log(f"교차로 검수 창 표시: {target.title}")
-        except Exception as exc:
-            log_exception_at_source(APP_LOG, "교차로 검수 창 표시 실패", exc)
+    def _on_manual_review_finished(self) -> None:
+        if not self._close_pending and (
+            self.worker is None or not self.worker.isRunning()
+        ):
+            self.review_select_btn.setEnabled(True)
 
     def _select_output(self) -> None:
         current = self.output_input.text().strip() or "results"
@@ -642,6 +639,12 @@ class MainWindow(QMainWindow):
             return
         self.review_monitor = ReviewSelectionMonitor(review_title, self)
         self.review_monitor.selection_changed.connect(self._on_review_selection)
+        self.review_monitor.manual_selection_ready.connect(
+            self._on_manual_review_selection
+        )
+        self.review_monitor.manual_selection_finished.connect(
+            self._on_manual_review_finished
+        )
         self.review_monitor.finished.connect(self._on_review_monitor_finished)
         self.review_monitor.start()
 
@@ -665,6 +668,7 @@ class MainWindow(QMainWindow):
         if monitor is not None:
             monitor.deleteLater()
         self.case_input.clear()
+        self.review_select_btn.setEnabled(False)
         self._log(
             "교차로 선택 감시 종료 · 검수 ID 자동 갱신 중지",
             logging.WARNING,
