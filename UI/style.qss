@@ -16,7 +16,7 @@ QLabel#status {
 QLabel#hint { color: #71808B; font-size: 10px; }
 QLabel#section { font-weight: bold; color: #44525D; padding-top: 5px; }
 QLabel#decision { color: #53616D; font-weight: bold; }
-QLineEdit, QComboBox, QSpinBox {
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
     color: #263540;
     background-color: rgba(255, 255, 255, 185);
     border: 1px solid rgba(200, 205, 210, 180);
@@ -60,4 +60,29 @@ QSlider::handle:horizontal {
     margin: -4px 0;
     background: #3683B4;
     border-radius: 6px;
+}
+
+/* Resizable capture, comparison and log sections. */
+QFrame#sectionCard {
+    background-color: rgba(255, 255, 255, 105);
+    border: 1px solid rgba(210, 218, 223, 155);
+    border-radius: 9px;
+}
+QPushButton#section_toggle {
+    border: none;
+    border-radius: 6px;
+    background-color: transparent;
+    color: #44525D;
+    font-weight: bold;
+    text-align: left;
+    padding: 4px 7px;
+}
+QPushButton#section_toggle:hover {
+    background-color: rgba(225, 237, 244, 185);
+}
+QSplitter#reviewSplitter::handle:vertical {
+    background-color: rgba(143, 157, 166, 115);
+    height: 5px;
+    margin: 0 24px;
+    border-radius: 2px;
 }
