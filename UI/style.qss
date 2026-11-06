@@ -86,3 +86,23 @@ QSplitter#reviewSplitter::handle:vertical {
     margin: 0 24px;
     border-radius: 2px;
 }
+
+/* Compact capture row: completed shots are green; untouched shots use default buttons. */
+QPushButton#stage_capture {
+    padding: 4px 3px;
+    font-size: 10px;
+}
+QPushButton#stage_capture[stageCaptured="true"] {
+    background-color: #278B54;
+    color: #FFFFFF;
+    border: 1px solid #207044;
+    font-weight: bold;
+}
+QPushButton#stage_capture[stageCaptured="true"]:hover {
+    background-color: #227C4B;
+}
+QPushButton#stage_capture[stageCaptured="true"]:disabled {
+    background-color: #73AC89;
+    border-color: #73AC89;
+    color: #F4FAF5;
+}

@@ -264,7 +264,14 @@ class MainWindow(QMainWindow):
         self.case_input = QLineEdit()
         self.case_input.setPlaceholderText("Polygon 또는 Link 선택 시 자동 입력")
         basic_grid.addWidget(self._label("검수 ID"), 2, 0)
-        basic_grid.addWidget(self.case_input, 2, 1, 1, 2)
+        basic_grid.addWidget(self.case_input, 2, 1)
+        self.review_select_btn = QPushButton("선택")
+        self.review_select_btn.setObjectName("select_button")
+        self.review_select_btn.setToolTip(
+            "교차로 선형 검수 창에서 현재 선택한 Polygon/Link ID를 읽습니다."
+        )
+        self.review_select_btn.clicked.connect(self._refresh_review_selection)
+        basic_grid.addWidget(self.review_select_btn, 2, 2)
         basic_grid.setColumnStretch(1, 1)
         layout.addLayout(basic_grid)
 
@@ -302,7 +309,7 @@ class MainWindow(QMainWindow):
         steps_scroller.setFrameShape(QFrame.Shape.NoFrame)
         steps_scroller.setWidgetResizable(True)
         steps_scroller.setObjectName("stageScroller")
-        steps_scroller.setMinimumHeight(142)
+        steps_scroller.setMinimumHeight(110)
         content = QWidget()
         content.setObjectName("content")
         sections = QVBoxLayout(content)
@@ -315,25 +322,31 @@ class MainWindow(QMainWindow):
 
         sections.addWidget(self._label("단계별 수동 촬영", "section"))
         self.stage_buttons = {}
-        self.stage_status_labels = {}
+        button_row = QHBoxLayout()
+        button_row.setSpacing(6)
+        short_labels = {
+            "before": "진입 전",
+            "after_left": "진입 후 좌",
+            "after_straight": "진입 후 직",
+            "after_right": "진입 후 우",
+        }
         for stage in STAGES:
-            row = QHBoxLayout()
-            button = QPushButton(STAGE_BUTTONS[stage])
+            button = QPushButton(short_labels[stage])
+            button.setObjectName("stage_capture")
+            button.setProperty("stageCaptured", False)
+            button.setMinimumWidth(0)
+            button.setFixedHeight(30)
             button.setToolTip(
-                f"{STAGE_LABELS[stage]}의 현재 HD_3D Tool/로드뷰 화면을 각각 1장 저장"
+                f"{STAGE_LABELS[stage]} 촬영 · 미촬영"
             )
             button.clicked.connect(
                 lambda checked=False, selected=stage: self._start(
                     "capture_" + selected
                 )
             )
-            status = self._label("미촬영", "hint")
-            status.setMinimumWidth(86)
-            row.addWidget(button, 4)
-            row.addWidget(status, 1)
-            sections.addLayout(row)
+            button_row.addWidget(button, 1)
             self.stage_buttons[stage] = button
-            self.stage_status_labels[stage] = status
+        sections.addLayout(button_row)
 
         self.stop_line_threshold_value = max(0.35, min(0.95, float(
             self.cfg.get("analysis", {}).get("stop_line_roadview_threshold", 0.68)
@@ -409,7 +422,7 @@ class MainWindow(QMainWindow):
         self.panel_splitter.setStretchFactor(0, 2)
         self.panel_splitter.setStretchFactor(1, 3)
         self.panel_splitter.setStretchFactor(2, 2)
-        QTimer.singleShot(0, lambda: self.panel_splitter.setSizes([270, 205, 135]))
+        QTimer.singleShot(0, lambda: self.panel_splitter.setSizes([150, 250, 150]))
         self._log_relay = _UILogRelay(self)
         self._log_relay.line_ready.connect(self._append_log_line)
         self._log_handler = _UILogHandler(self._log_relay)
@@ -570,6 +583,31 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             log_exception_at_source(APP_LOG, f"{label} 선택 실패", exc)
 
+    def _refresh_review_selection(self) -> None:
+        """Read the current Polygon/Link selection without changing window focus."""
+        monitor = self.review_monitor
+        if monitor is None or not monitor.request_selection_refresh():
+            self._log(
+                "검수 ID 수동 조회 불가: 선택 감시가 실행 중이 아니거나 다른 작업 중입니다.",
+                logging.WARNING,
+            )
+            return
+        self.review_select_btn.setEnabled(False)
+
+    def _on_manual_review_selection(self, review_id: str) -> None:
+        if self._close_pending or (
+            self.worker is not None and self.worker.isRunning()
+        ):
+            return
+        self.case_input.setText(review_id)
+        self._log(f"검수 ID 수동 조회 완료: {review_id}")
+
+    def _on_manual_review_finished(self) -> None:
+        if not self._close_pending and (
+            self.worker is None or not self.worker.isRunning()
+        ):
+            self.review_select_btn.setEnabled(True)
+
     def _select_output(self) -> None:
         current = self.output_input.text().strip() or "results"
         start = Path(current)
@@ -601,6 +639,12 @@ class MainWindow(QMainWindow):
             return
         self.review_monitor = ReviewSelectionMonitor(review_title, self)
         self.review_monitor.selection_changed.connect(self._on_review_selection)
+        self.review_monitor.manual_selection_ready.connect(
+            self._on_manual_review_selection
+        )
+        self.review_monitor.manual_selection_finished.connect(
+            self._on_manual_review_finished
+        )
         self.review_monitor.finished.connect(self._on_review_monitor_finished)
         self.review_monitor.start()
 
@@ -624,6 +668,7 @@ class MainWindow(QMainWindow):
         if monitor is not None:
             monitor.deleteLater()
         self.case_input.clear()
+        self.review_select_btn.setEnabled(False)
         self._log(
             "교차로 선택 감시 종료 · 검수 ID 자동 갱신 중지",
             logging.WARNING,
@@ -674,6 +719,25 @@ class MainWindow(QMainWindow):
         base = configured if configured.is_absolute() else ROOT / configured
         return base / case_id
 
+    def _set_capture_state(
+        self, stage: str, captured: bool, revision: int = 0,
+        partial: bool = False,
+    ) -> None:
+        """Show completed shots using a green button, without extra labels."""
+        from map_validator.stage_types import STAGE_LABELS
+
+        button = self.stage_buttons[stage]
+        if button.property("stageCaptured") != captured:
+            button.setProperty("stageCaptured", captured)
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
+        state = (
+            f"촬영 완료 ({revision}회)" if captured
+            else "일부 누락" if partial else "미촬영"
+        )
+        button.setToolTip(f"{STAGE_LABELS[stage]} · {state}")
+
     def _refresh_stage_states(self, _text: str = "") -> None:
         from map_validator.stage_types import STAGES
         from map_validator.staged_capture import read_manifest, stage_status
@@ -687,16 +751,8 @@ class MainWindow(QMainWindow):
             self.folder_btn.setEnabled(False)
 
         folder = self._case_folder()
-        states = {
-            "not_captured": "미촬영",
-            "partial_capture": "일부 누락",
-            "captured": "촬영 완료",
-        }
         for stage in STAGES:
-            label = self.stage_status_labels.get(stage)
-            if label is not None:
-                label.setText("미촬영")
-                label.setStyleSheet("")
+            self._set_capture_state(stage, False)
         if folder is None:
             return
         try:
@@ -704,13 +760,9 @@ class MainWindow(QMainWindow):
             for stage in STAGES:
                 record = manifest["stages"][stage]
                 current = stage_status(folder, record)
-                revision = record.get("revision", 0)
-                suffix = f" · {revision}회" if current == "captured" else ""
-                status = self.stage_status_labels[stage]
-                status.setText(states.get(current, "확인 필요") + suffix)
-                status.setStyleSheet(
-                    "color: #21884B; font-weight: bold;"
-                    if current == "captured" else ""
+                self._set_capture_state(
+                    stage, current == "captured", record.get("revision", 0),
+                    partial=current == "partial_capture",
                 )
             if folder.is_dir():
                 self.latest_folder = str(folder)
@@ -773,7 +825,8 @@ class MainWindow(QMainWindow):
             *self.stage_buttons.values(), self.start_btn, self.save_btn,
             self.settings_btn,
             self.case_input, self.work_input, self.view_input,
-            self.work_select_btn, self.view_select_btn, self.window_info_btn,
+            self.work_select_btn, self.view_select_btn, self.review_select_btn,
+            self.window_info_btn,
             self.output_input,
         ):
             widget.setEnabled(not busy)
