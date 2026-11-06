@@ -6,7 +6,9 @@ per-field uncertainty separate; no status constitutes an automatic approval.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -24,6 +26,14 @@ from .road_scores import (
 )
 from .stage_types import FIELD_LABELS, STAGES, STAGE_LABELS, fields_for_stage
 from .staged_capture import read_manifest, stage_status, stored_image
+
+
+APP_LOG = logging.getLogger("map_validator.staged_compare")
+
+
+def _diag(value) -> str:
+    """Stable, copyable single-line evidence for the UI and file log."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
 def _read_image(path: Path) -> np.ndarray:
@@ -109,7 +119,12 @@ def analyze_stages(
     check_stop()
     if not .35 <= stop_line_threshold <= .95:
         raise ValueError("로드뷰 정지선 threshold는 0.35~0.95 범위여야 합니다.")
+    analysis_started = time.perf_counter()
     manifest = read_manifest(folder, case_id)
+    APP_LOG.info(
+        "분석 진단 시작 | 검수ID=%s | 모델=%s | 정지선기준=%.3f | 결과폴더=%s",
+        case_id, model_name, stop_line_threshold, folder,
+    )
     available = [
         stage for stage in STAGES
         if stage_status(folder, manifest["stages"][stage]) == "captured"
@@ -132,9 +147,19 @@ def analyze_stages(
     assessed = 0
     for stage in STAGES:
         check_stop()
+        stage_started = time.perf_counter()
         record = manifest["stages"][stage]
         state = stage_status(folder, record)
+        APP_LOG.info(
+            "분석 진단 단계 | 단계=%s | 촬영상태=%s | 촬영버전=%s | 촬영시각=%s",
+            STAGE_LABELS[stage], state, record.get("revision"),
+            record.get("captured_at"),
+        )
         if state != "captured":
+            APP_LOG.warning(
+                "분석 진단 촬영누락 | 단계=%s | 입력툴사진=%s | 로드뷰사진=%s",
+                STAGE_LABELS[stage], record.get("work_image"), record.get("roadview_image"),
+            )
             report["stages"][stage] = {
                 "stage": stage, "label": STAGE_LABELS[stage],
                 "capture_state": state, "analysis_state": "not_analyzed",
@@ -150,7 +175,23 @@ def analyze_stages(
             raise RuntimeError("촬영 상태 변경으로 원본 파일을 찾지 못했습니다.")
         input_image = _read_image(input_path)
         road_image = _read_image(road_path)
+        APP_LOG.info(
+            "분석 진단 원본 | 단계=%s | 입력툴=%s (%dx%d) | 로드뷰=%s (%dx%d)",
+            STAGE_LABELS[stage], input_path.name,
+            input_image.shape[1], input_image.shape[0], road_path.name,
+            road_image.shape[1], road_image.shape[0],
+        )
         input_expected, input_overlay, route = extract_input_features(input_image, stage)
+        if stage != "before":
+            APP_LOG.info(
+                "분석 진단 입력경로 | 단계=%s | 경로상태=%s | 추정방향=%s | 회전각=%s"
+                " | 색상선개수=%s | 연결간격=%s | 후보중복=%s | 보류사유=%s",
+                STAGE_LABELS[stage], route.get("status"),
+                route.get("expected_turn"), route.get("turn_angle_deg"),
+                _diag(route.get("component_counts")),
+                _diag(route.get("join_gaps_px")),
+                route.get("ambiguous_path_choices"), route.get("reason", "없음"),
+            )
         check_stop()
         masks = segmenter.class_masks(road_image)
         # One segmentation pass supplies BOTH the qualitative detector and
@@ -159,6 +200,38 @@ def analyze_stages(
         roadview_observed, road_overlay, evidence = extract_roadview_features(
             road_image, stage, masks, stop_line_threshold=stop_line_threshold
         )
+        APP_LOG.info(
+            "분석 진단 도로마스크 | 단계=%s | 도로비율=%s | 건물비율=%s"
+            " | ROI도로점수=%s | ROI픽셀수=%s",
+            STAGE_LABELS[stage], evidence.get("road_ratio"),
+            evidence.get("building_ratio"), _diag(score_observation["scores"]),
+            _diag(score_observation["pixels"]),
+        )
+        if stage == "before":
+            expected_stop = input_expected["stop_line"]
+            observed_stop = roadview_observed["stop_line"]
+            APP_LOG.info(
+                "분석 진단 정지선 | 입력툴값=%s | 입력툴후보점수=%s"
+                " | 입력툴방법=%s | 입력툴근거=%s | 입력툴사유=%s"
+                " | 로드뷰값=%s | 로드뷰후보점수=%s | 로드뷰방법=%s"
+                " | 로드뷰근거=%s | 로드뷰사유=%s",
+                expected_stop.get("value"), expected_stop.get("confidence"),
+                expected_stop.get("method"), _diag(expected_stop.get("evidence")),
+                expected_stop.get("reason"), observed_stop.get("value"),
+                observed_stop.get("confidence"), observed_stop.get("method"),
+                _diag(observed_stop.get("evidence")), observed_stop.get("reason"),
+            )
+        else:
+            presence = roadview_observed.get("road_exists", {})
+            APP_LOG.info(
+                "분석 진단 도로존재 | 단계=%s | 판별값=%s | 후보점수=%s"
+                " | 검출방법=%s | 전방ROI=%s | 비율=%s | 기준=도로>=0.24"
+                " 또는 (건물>=0.46, 도로<0.055) | 보류사유=%s",
+                STAGE_LABELS[stage], presence.get("value"),
+                presence.get("confidence"), presence.get("method"),
+                _diag(presence.get("roi")), _diag(presence.get("evidence_scores")),
+                presence.get("reason"),
+            )
         compare = {
             key: compare_values(input_expected[key], roadview_observed[key], key)
             for key in fields_for_stage(stage)
@@ -172,6 +245,25 @@ def analyze_stages(
         else:
             stage_result = "insufficient_evidence"
         assessed += 1
+        for field, item in compare.items():
+            expected_feature = input_expected[field]
+            observed_feature = roadview_observed[field]
+            APP_LOG.info(
+                "분석 진단 항목 | 단계=%s | 항목=%s | 기대값=%s"
+                " | 관측값=%s | 결과=%s | P/F/N근거=%s"
+                " | 기대방법=%s | 기대후보점수=%s | 관측방법=%s"
+                " | 관측후보점수=%s | 기대보류사유=%s | 관측보류사유=%s",
+                STAGE_LABELS[stage], FIELD_LABELS[field],
+                _diag(item.get("expected_value")), _diag(item.get("observed_value")),
+                item.get("status"), item.get("reason"),
+                expected_feature.get("method"), expected_feature.get("confidence"),
+                observed_feature.get("method"), observed_feature.get("confidence"),
+                expected_feature.get("reason"), observed_feature.get("reason"),
+            )
+        APP_LOG.info(
+            "분석 진단 단계완료 | 단계=%s | 결과=%s | 소요=%.2f초",
+            STAGE_LABELS[stage], stage_result, time.perf_counter() - stage_started,
+        )
 
         revision = int(record.get("revision", 0))
         overlay_dir = folder / "overlays"
@@ -230,6 +322,13 @@ def analyze_stages(
             "사진의 방향, 실제 연결 관계 및 최종 판정은 사용자가 확인해야 합니다."
         ),
     }
+    APP_LOG.info(
+        "분석 진단 종합 | 검수ID=%s | 판정=%s | 촬영완료=%d/%d"
+        " | 불일치의심단계=%d | 정지선판정=%s | 총분석시간=%.2f초"
+        " | 주의=후보점수는 확률이 아니며 최종 판정은 사람 검수 필요",
+        case_id, overall, assessed, len(STAGES), mismatch_count,
+        report["summary"]["stop_line_verdict"], time.perf_counter() - analysis_started,
+    )
     check_stop()
     scores = assemble_score_record(
         case_id=case_id,
