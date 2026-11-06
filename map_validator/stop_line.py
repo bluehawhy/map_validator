@@ -127,6 +127,13 @@ def detect_roadview_stop_line(
     # Find repeated transverse paint marks, the signature of a crosswalk.
     paint_crop = paint[y0:y1, x0:x1]
     lines_of_paint = _horizontal_lines(paint_crop, w, .13)
+    diagnostics = {
+        "roi": [x0, y0, x1, y1],
+        "visible_road_ratio": round(visible_road, 4),
+        "threshold": threshold,
+        "white_line_candidate_count": len(segments),
+        "paint_line_candidate_count": len(lines_of_paint),
+    }
     candidates = []
     rejected_crosswalk = 0
     for x1c, y1c, x2c, y2c in segments:
@@ -165,39 +172,63 @@ def detect_roadview_stop_line(
         )
         candidates.append((confidence, (left_x, y1c + y0), (right_x, y2c + y0)))
 
+    diagnostics["crosswalk_rejected_count"] = rejected_crosswalk
+    diagnostics["isolated_line_candidate_count"] = len(candidates)
     if candidates:
         confidence, p1, p2 = max(candidates, key=lambda item: item[0])
+        diagnostics["best_line_score"] = round(confidence, 4)
         if confidence >= threshold:
             cv2.line(overlay, p1, p2, (0, 255, 255), 3)
             cv2.putText(overlay, "WHITE STOP LINE?", (p1[0], max(20, p1[1]-10)),
                         cv2.FONT_HERSHEY_SIMPLEX, .48, (0, 255, 255), 2, cv2.LINE_AA)
+            diagnostics["decision_blockers"] = []
             return _finding(
                 True, confidence, "isolated_white_stopline_v1",
                 "횡단보도 반복 무늬와 분리된 흰색 가로 정지선 후보가 검출됐습니다.",
-                endpoints=[list(p1), list(p2)],
-                threshold=threshold, rejected_crosswalk=rejected_crosswalk,
-                visible_road_ratio=round(visible_road, 4),
+                endpoints=[list(p1), list(p2)], **diagnostics,
             )
+        diagnostics["decision_blockers"] = ["isolated_line_score_below_threshold"]
         return _finding(
             None, confidence, "isolated_white_stopline_v1",
-            "단독 흰색 가로선 후보는 있지만 threshold에 미달해 추가 확인이 필요합니다.",
-            threshold=threshold, rejected_crosswalk=rejected_crosswalk,
-            visible_road_ratio=round(visible_road, 4),
+            "단독 흰색 가로선 후보가 있지만 판정 기준 점수에 미달했습니다.",
+            **diagnostics,
         )
 
-    # Clearly visible unobstructed road with no crossing markings is weak
-    # negative evidence. With crosswalk candidates or poor visibility, retain
-    # 'unknown' rather than confusing a zebra stripe with a stop line.
+    # The absence verdict is intentionally conservative: a visible road
+    # without isolated white bars is not enough when crosswalk-like paint
+    # candidates remain or the road is poorly visible.
     absence_confidence = min(.82, .47 + visible_road * .38)
-    if rejected_crosswalk == 0 and not lines_of_paint and absence_confidence >= threshold:
+    diagnostics["absence_score"] = round(absence_confidence, 4)
+    blockers = []
+    if rejected_crosswalk:
+        blockers.append("crosswalk_like_lines_rejected")
+    if lines_of_paint:
+        blockers.append("crosswalk_or_other_transverse_paint_visible")
+    if absence_confidence < threshold:
+        blockers.append("absence_score_below_threshold")
+    diagnostics["decision_blockers"] = blockers
+    if not blockers:
         return _finding(
             False, absence_confidence, "isolated_white_stopline_v1",
             "전방 도로는 보이지만 정지선 및 횡단보도 가로 표식이 검출되지 않았습니다.",
-            threshold=threshold, visible_road_ratio=round(visible_road, 4),
+            **diagnostics,
+        )
+    if rejected_crosswalk:
+        reason = (
+            "횡단보도로 의심되는 반복 가로선을 제외했으므로 독립된 정지선의 "
+            "부재까지는 확정하지 않습니다."
+        )
+    elif lines_of_paint:
+        reason = (
+            "전방에 흰색·노란색 가로 표식 후보가 있어 횡단보도와 "
+            "정지선의 구분이 불확실합니다."
+        )
+    else:
+        reason = (
+            "도로 가시성에 따른 정지선 부재 후보 점수가 기준에 미달하여 "
+            "정지선이 없다고 확정할 수 없습니다."
         )
     return _finding(
         None, None, "isolated_white_stopline_v1",
-        "횡단보도 표시 또는 가림/원근 때문에 독립된 정지선의 유무가 불분명합니다. 수동 확인이 필요합니다.",
-        threshold=threshold, rejected_crosswalk=rejected_crosswalk,
-        visible_road_ratio=round(visible_road, 4),
+        reason, **diagnostics,
     )
