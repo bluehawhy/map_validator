@@ -443,6 +443,68 @@ class MainWindow(QMainWindow):
             title = title.split(" - ", 1)[0].strip()
         return title
 
+    def _show_analysis_settings(self) -> None:
+        """Open threshold settings without occupying the capture workspace."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("분석 설정")
+        dialog.setMinimumWidth(350)
+        dialog.setStyleSheet("QDialog { background-color: #F3F3F3; }")
+        form = QVBoxLayout(dialog)
+        form.setContentsMargins(18, 16, 18, 16)
+        form.setSpacing(11)
+        form.addWidget(self._label("로드뷰 정지선 threshold", "section"))
+        threshold = QDoubleSpinBox(dialog)
+        threshold.setRange(0.35, 0.95)
+        threshold.setSingleStep(0.05)
+        threshold.setDecimals(2)
+        threshold.setValue(self.stop_line_threshold_value)
+        threshold.setToolTip(
+            "로드뷰 단독 흰색 정지선의 최소 검출 점수입니다."
+        )
+        form.addWidget(threshold)
+        form.addWidget(self._label(
+            "높을수록 엄격하게 판정하며, 판단 보류가 늘어날 수 있습니다. "
+            "횡단보도는 정지선으로 판정하지 않습니다.", "hint"
+        ))
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save |
+            QDialogButtonBox.StandardButton.Cancel,
+            parent=dialog,
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("저장")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("취소")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addWidget(buttons)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            value = round(threshold.value(), 2)
+            if value != self.stop_line_threshold_value:
+                self.stop_line_threshold_value = value
+                self._save_settings()
+                self._log(f"로드뷰 정지선 threshold 변경: {value:.2f}")
+
+    def _toggle_panel(self, key: str, expanded: bool) -> None:
+        """Collapse/expand either pane; splitter handles remain draggable."""
+        body, toggle, title, index = self._panels[key]
+        sizes = self.panel_splitter.sizes()
+        if expanded:
+            body.show()
+            toggle.setText("▾  " + title)
+            desired = self._panel_sizes_before_collapse.get(key, 170)
+            delta = min(max(0, desired - sizes[index]), max(0, sizes[0] - 145))
+            sizes[index] += delta
+            sizes[0] -= delta
+        else:
+            self._panel_sizes_before_collapse[key] = sizes[index]
+            body.hide()
+            toggle.setText("▸  " + title)
+            gained = max(0, sizes[index] - 37)
+            sizes[index] -= gained
+            sizes[0] += gained
+        QTimer.singleShot(
+            0, lambda new_sizes=sizes: self.panel_splitter.setSizes(new_sizes)
+        )
+
     def _show_window_info(self) -> None:
         from .window_info_dialog import WindowInfoDialog
 
@@ -535,7 +597,6 @@ class MainWindow(QMainWindow):
             "intersection_review_title", ""
         ).strip()
         if not review_title:
-            self.review_monitor_toggle.setEnabled(False)
             self._log("선택 감시 사용 불가: 교차로 선형 검수 창 제목이 없습니다.")
             return
         self.review_monitor = ReviewSelectionMonitor(review_title, self)
@@ -543,23 +604,8 @@ class MainWindow(QMainWindow):
         self.review_monitor.finished.connect(self._on_review_monitor_finished)
         self.review_monitor.start()
 
-    def _toggle_review_monitor(self, enabled: bool) -> None:
-        # A stale ID must not silently be used after the selection changes.
-        self.case_input.clear()
-        if enabled:
-            self._log("교차로 선택 감시 켜기 요청")
-            self._start_review_monitor()
-        else:
-            self._log("교차로 선택 감시 끄기 요청 · 후크 해제 중")
-            if self.review_monitor is not None and self.review_monitor.isRunning():
-                self.review_monitor_toggle.setEnabled(False)
-                self.review_monitor.set_paused(True)
-                self.review_monitor.requestInterruption()
-            else:
-                self._log("교차로 선택 감시 꺼짐 · 검수 ID 자동 갱신 중지")
-
     def _on_review_selection(self, review_id: str) -> None:
-        if not self.review_monitor_toggle.isChecked() or self._close_pending or (
+        if self._close_pending or (
             self.worker is not None and self.worker.isRunning()
         ):
             return
@@ -577,16 +623,10 @@ class MainWindow(QMainWindow):
         self.review_monitor = None
         if monitor is not None:
             monitor.deleteLater()
-        if self.review_monitor_toggle.isChecked():
-            self.review_monitor_toggle.blockSignals(True)
-            self.review_monitor_toggle.setChecked(False)
-            self.review_monitor_toggle.blockSignals(False)
-            self.case_input.clear()
-            self._log("선택 감시가 종료되어 자동 갱신을 껐습니다.", logging.WARNING)
-        else:
-            self._log("교차로 선택 감시 꺼짐 · 후크 해제 결과는 위 로그 확인")
-        self.review_monitor_toggle.setEnabled(
-            self.worker is None or not self.worker.isRunning()
+        self.case_input.clear()
+        self._log(
+            "교차로 선택 감시 종료 · 검수 ID 자동 갱신 중지",
+            logging.WARNING,
         )
 
     def _on_analysis_case_id(self, case_id: str) -> None:
@@ -599,7 +639,7 @@ class MainWindow(QMainWindow):
         cfg.setdefault("ui", {})
         cfg.setdefault("analysis", {})
         cfg["analysis"]["stop_line_roadview_threshold"] = round(
-            self.stop_line_threshold.value(), 2
+            self.stop_line_threshold_value, 2
         )
         cfg["windows"]["work_title"] = self.work_input.text().strip()
         cfg["windows"]["roadview_title"] = self.view_input.text().strip()
@@ -656,6 +696,7 @@ class MainWindow(QMainWindow):
             label = self.stage_status_labels.get(stage)
             if label is not None:
                 label.setText("미촬영")
+                label.setStyleSheet("")
         if folder is None:
             return
         try:
@@ -665,8 +706,11 @@ class MainWindow(QMainWindow):
                 current = stage_status(folder, record)
                 revision = record.get("revision", 0)
                 suffix = f" · {revision}회" if current == "captured" else ""
-                self.stage_status_labels[stage].setText(
-                    states.get(current, "확인 필요") + suffix
+                status = self.stage_status_labels[stage]
+                status.setText(states.get(current, "확인 필요") + suffix)
+                status.setStyleSheet(
+                    "color: #21884B; font-weight: bold;"
+                    if current == "captured" else ""
                 )
             if folder.is_dir():
                 self.latest_folder = str(folder)
@@ -714,7 +758,7 @@ class MainWindow(QMainWindow):
             self._scroll_to_results = False
             scroll_position = self.steps_scroller.verticalScrollBar().value()
             # Move focus outside the scroll area before disabling its buttons.
-            self.status_label.setFocus(Qt.FocusReason.OtherFocusReason)
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
             self._busy(True)
             if action.startswith("capture_"):
                 self.steps_scroller.verticalScrollBar().setValue(scroll_position)
@@ -727,17 +771,15 @@ class MainWindow(QMainWindow):
     def _busy(self, busy: bool) -> None:
         for widget in (
             *self.stage_buttons.values(), self.start_btn, self.save_btn,
-            self.stop_line_threshold,
+            self.settings_btn,
             self.case_input, self.work_input, self.view_input,
             self.work_select_btn, self.view_select_btn, self.window_info_btn,
-            self.output_input, self.review_monitor_toggle,
+            self.output_input,
         ):
             widget.setEnabled(not busy)
         self.stop_btn.setEnabled(busy)
         if self.review_monitor is not None:
             self.review_monitor.set_paused(busy)
-            if not busy and self.review_monitor.isInterruptionRequested():
-                self.review_monitor_toggle.setEnabled(False)
 
     def _restore_panel(self) -> None:
         if not self.isVisible():
@@ -905,10 +947,15 @@ class MainWindow(QMainWindow):
             self.steps_scroller.verticalScrollBar().setValue(scroll_position)
 
     def _show_comparison_section(self) -> None:
-        # Layout changes are applied before locating the result section.
-        content = self.steps_scroller.widget()
-        position = self.result_heading.mapTo(content, self.result_heading.rect().topLeft())
-        self.steps_scroller.verticalScrollBar().setValue(position.y())
+        # Expand the independent result pane instead of scrolling capture controls.
+        self.result_heading.setChecked(True)
+        sizes = self.panel_splitter.sizes()
+        if sizes[1] < 185 and sizes[0] > 145:
+            grow = min(185 - sizes[1], sizes[0] - 145)
+            sizes[0] -= grow
+            sizes[1] += grow
+            self.panel_splitter.setSizes(sizes)
+        self.analysis_details.verticalScrollBar().setValue(0)
 
     def _open_folder(self) -> None:
         if self.latest_folder and Path(self.latest_folder).is_dir():
