@@ -37,6 +37,8 @@ class ReviewSelectionMonitor(QThread):
     """Listen to click events without moving, activating, or resizing windows."""
 
     selection_changed = pyqtSignal(str)
+    manual_selection_ready = pyqtSignal(str)
+    manual_selection_finished = pyqtSignal()
 
     def __init__(self, review_title: str, parent=None) -> None:
         super().__init__(parent)
@@ -46,6 +48,7 @@ class ReviewSelectionMonitor(QThread):
         self._stop = threading.Event()
         self._condition = threading.Condition()
         self._pending = False
+        self._manual_pending = False
         self._last_click_at = 0.0
 
     def set_paused(self, paused: bool) -> None:
@@ -56,6 +59,23 @@ class ReviewSelectionMonitor(QThread):
             else:
                 self._paused.clear()
             self._condition.notify_all()
+
+    def request_selection_refresh(self) -> bool:
+        """Queue a manual selection read in the existing background reader.
+
+        Does not activate, restore, move or resize the review window.
+        """
+        with self._condition:
+            if (self._paused.is_set() or self._stop.is_set()
+                    or self.isInterruptionRequested() or not self.isRunning()):
+                return False
+            self._manual_pending = True
+            self._pending = True
+            # The click-settle delay is unnecessary for an explicit refresh.
+            self._last_click_at = time.monotonic() - SELECTION_SETTLE_SECONDS
+            self._condition.notify_all()
+        APP_LOG.info("검수 ID 수동 조회 요청")
+        return True
 
     def _schedule_read(self) -> None:
         # Called by the low-level mouse hook. Never perform any UIA work here.
@@ -92,15 +112,22 @@ class ReviewSelectionMonitor(QThread):
                         if self._stop.is_set():
                             return
                         click_at = self._last_click_at
+                        manual = self._manual_pending
+                        self._manual_pending = False
                         self._pending = False
 
                     if self._paused.is_set():
+                        if manual:
+                            self.manual_selection_finished.emit()
                         continue
                     read_started = time.monotonic()
-                    APP_LOG.info(
-                        "선택 조회 시작 · 클릭 후 %.0fms",
-                        (read_started - click_at) * 1000,
-                    )
+                    if manual:
+                        APP_LOG.info("검수 ID 수동 조회 시작")
+                    else:
+                        APP_LOG.info(
+                            "선택 조회 시작 · 클릭 후 %.0fms",
+                            (read_started - click_at) * 1000,
+                        )
                     outcome = "실패"
                     try:
                         selected = read_selected_intersection_id(
@@ -108,24 +135,25 @@ class ReviewSelectionMonitor(QThread):
                             diagnostic=lambda message: APP_LOG.info("선택 조회 · %s", message),
                         )
                         outcome = "변경" if selected and selected != last_selection else "변경 없음"
-                        if (
-                            selected
-                            and selected != last_selection
-                            and not self._paused.is_set()
-                            and not self._stop.is_set()
-                        ):
+                        if (selected and not self._paused.is_set()
+                                and not self._stop.is_set()):
                             last_selection = selected
-                            self.selection_changed.emit(selected)
+                            if manual:
+                                self.manual_selection_ready.emit(selected)
+                            elif outcome == "변경":
+                                self.selection_changed.emit(selected)
                     except Exception as exc:
                         # The selection or window may disappear during a read.
                         APP_LOG.warning("선택 조회 실패 · %s: %s", type(exc).__name__, exc)
                     finally:
                         finished = time.monotonic()
                         APP_LOG.info(
-                            "선택 조회 종료 · 결과 %s · 조회 %.0fms · 클릭 후 %.0fms",
+                            "%s · 결과 %s · 조회 %.0fms",
+                            "검수 ID 수동 조회 종료" if manual else "선택 조회 종료",
                             outcome, (finished - read_started) * 1000,
-                            (finished - click_at) * 1000,
                         )
+                        if manual:
+                            self.manual_selection_finished.emit()
         except Exception as exc:
             log_exception_at_source(APP_LOG, "클릭 기반 검수 ID 조회 오류", exc)
 
