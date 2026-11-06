@@ -53,12 +53,16 @@ class ReviewSelectionMonitor(QThread):
 
     def set_paused(self, paused: bool) -> None:
         with self._condition:
+            cancelled_manual = paused and self._pending and self._manual_pending
             if paused:
                 self._paused.set()
                 self._pending = False
+                self._manual_pending = False
             else:
                 self._paused.clear()
             self._condition.notify_all()
+        if cancelled_manual:
+            self.manual_selection_finished.emit()
 
     def request_selection_refresh(self) -> bool:
         """Queue a manual selection read in the existing background reader.
@@ -147,11 +151,17 @@ class ReviewSelectionMonitor(QThread):
                         APP_LOG.warning("선택 조회 실패 · %s: %s", type(exc).__name__, exc)
                     finally:
                         finished = time.monotonic()
-                        APP_LOG.info(
-                            "%s · 결과 %s · 조회 %.0fms",
-                            "검수 ID 수동 조회 종료" if manual else "선택 조회 종료",
-                            outcome, (finished - read_started) * 1000,
-                        )
+                        if manual:
+                            APP_LOG.info(
+                                "검수 ID 수동 조회 종료 · 결과 %s · 조회 %.0fms",
+                                outcome, (finished - read_started) * 1000,
+                            )
+                        else:
+                            APP_LOG.info(
+                                "선택 조회 종료 · 결과 %s · 조회 %.0fms · 클릭 후 %.0fms",
+                                outcome, (finished - read_started) * 1000,
+                                (finished - click_at) * 1000,
+                            )
                         if manual:
                             self.manual_selection_finished.emit()
         except Exception as exc:
