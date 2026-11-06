@@ -15,7 +15,8 @@ from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
-    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -23,6 +24,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QScrollArea,
+    QSplitter,
     QFrame,
     QDoubleSpinBox,
     QPushButton,
@@ -103,6 +105,7 @@ class MainWindow(QMainWindow):
         self._close_pending = False
         self.latest_folder: str | None = None
         self._displayed_case_id = ""
+        self._panel_sizes_before_collapse = {}
         self.cfg = self._read_settings()
         self._setup()
         self._start_review_monitor()
@@ -166,8 +169,9 @@ class MainWindow(QMainWindow):
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setMinimumSize(485, 590)
-        self.resize(510, 740)
+        self.setMinimumSize(485, 570)
+        self.resize(510, 760)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         opacity = float(self.cfg.get("ui", {}).get("opacity", 0.92))
         self.setWindowOpacity(max(0.35, min(opacity, 1.0)))
         outer = QWidget()
@@ -203,6 +207,12 @@ class MainWindow(QMainWindow):
         )
         self.opacity_slider.sliderReleased.connect(self._save_settings)
         header_layout.addWidget(self.opacity_slider)
+        self.settings_btn = QPushButton("⚙")
+        self.settings_btn.setObjectName("header_button")
+        self.settings_btn.setFixedSize(25, 23)
+        self.settings_btn.setToolTip("분석 설정 · 로드뷰 정지선 threshold")
+        self.settings_btn.clicked.connect(self._show_analysis_settings)
+        header_layout.addWidget(self.settings_btn)
         for label, callback, tooltip in (
             ("—", self.showMinimized, "숨기기 (Esc)"),
             ("×", self.close, "종료"),
@@ -215,9 +225,8 @@ class MainWindow(QMainWindow):
             header_layout.addWidget(btn)
         layout.addWidget(header)
 
+        # Worker progress remains log-backed; no persistent top status strip.
         self.status_label = self._label("준비됨 | 현장 최종 검수 필요", "status")
-        self.status_label.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        layout.addWidget(self.status_label)
 
         target_header = QHBoxLayout()
         target_header.addWidget(self._label("대상 설정", "section"))
@@ -259,13 +268,7 @@ class MainWindow(QMainWindow):
         basic_grid.setColumnStretch(1, 1)
         layout.addLayout(basic_grid)
 
-        self.review_monitor_toggle = QCheckBox("교차로 선택 자동 감시")
-        self.review_monitor_toggle.setChecked(True)
-        self.review_monitor_toggle.setToolTip(
-            "끄면 전역 마우스 후크를 해제합니다. 검수 ID는 자동 갱신되지 않습니다."
-        )
-        self.review_monitor_toggle.toggled.connect(self._toggle_review_monitor)
-        layout.addWidget(self.review_monitor_toggle)
+        # Selection monitor remains automatic, without a manual UI toggle.
 
         for field in (self.work_input, self.view_input):
             field.editingFinished.connect(self._save_settings)
@@ -287,27 +290,30 @@ class MainWindow(QMainWindow):
         output_row.addWidget(output_browse)
         layout.addLayout(output_row)
 
-        # Keep stage controls accessible on smaller displays. Only the
-        # map_validator panel may resize; neither target application is touched.
+        # Three independently resizable areas keep capture controls visible,
+        # while review results and log output use their own collapsible widgets.
+        self.panel_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.panel_splitter.setObjectName("reviewSplitter")
+        self.panel_splitter.setChildrenCollapsible(False)
+        layout.addWidget(self.panel_splitter, 1)
+
         steps_scroller = QScrollArea()
         self.steps_scroller = steps_scroller
         steps_scroller.setFrameShape(QFrame.Shape.NoFrame)
         steps_scroller.setWidgetResizable(True)
         steps_scroller.setObjectName("stageScroller")
+        steps_scroller.setMinimumHeight(142)
         content = QWidget()
         content.setObjectName("content")
         sections = QVBoxLayout(content)
         sections.setContentsMargins(1, 0, 4, 0)
         sections.setSpacing(6)
         steps_scroller.setWidget(content)
-        layout.addWidget(steps_scroller, 2)
+        self.panel_splitter.addWidget(steps_scroller)
 
         from map_validator.stage_types import STAGES, STAGE_BUTTONS, STAGE_LABELS
 
-        sections.addWidget(self._label("1. 단계별 수동 촬영", "section"))
-        sections.addWidget(self._label(
-            "※ 각 방향은 도로가 없어도 촬영하세요. 위치·시점은 직접 조정합니다.", "hint"
-        ))
+        sections.addWidget(self._label("단계별 수동 촬영", "section"))
         self.stage_buttons = {}
         self.stage_status_labels = {}
         for stage in STAGES:
@@ -322,34 +328,16 @@ class MainWindow(QMainWindow):
                 )
             )
             status = self._label("미촬영", "hint")
-            status.setMinimumWidth(112)
-            row.addWidget(button, 3)
-            row.addWidget(status, 2)
+            status.setMinimumWidth(86)
+            row.addWidget(button, 4)
+            row.addWidget(status, 1)
             sections.addLayout(row)
             self.stage_buttons[stage] = button
             self.stage_status_labels[stage] = status
 
-        threshold_row = QHBoxLayout()
-        threshold_row.addWidget(self._label("로드뷰 정지선 threshold", "hint"))
-        self.stop_line_threshold = QDoubleSpinBox()
-        self.stop_line_threshold.setRange(0.35, 0.95)
-        self.stop_line_threshold.setSingleStep(0.05)
-        self.stop_line_threshold.setDecimals(2)
-        self.stop_line_threshold.setValue(
-            max(0.35, min(0.95, float(
-                self.cfg.get("analysis", {}).get("stop_line_roadview_threshold", 0.68)
-            )))
-        )
-        self.stop_line_threshold.setToolTip(
-            "로드뷰 단독 흰색 정지선의 최소 검출 신뢰도. "
-            "높일수록 엄격하게 판정하며 횡단보도는 정지선에서 제외합니다."
-        )
-        # Save after editing, not on every spinbox increment/keystroke.
-        self.stop_line_threshold.editingFinished.connect(self._save_settings)
-        threshold_row.addWidget(self.stop_line_threshold)
-        threshold_row.addStretch(1)
-        sections.addLayout(threshold_row)
-
+        self.stop_line_threshold_value = max(0.35, min(0.95, float(
+            self.cfg.get("analysis", {}).get("stop_line_roadview_threshold", 0.68)
+        )))
         actions = QHBoxLayout()
         self.start_btn = QPushButton("촬영본 분석")
         self.start_btn.setObjectName("primary")
@@ -361,25 +349,67 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.start_btn, 2)
         actions.addWidget(self.stop_btn, 1)
         sections.addLayout(actions)
+        sections.addStretch(1)
 
-        self.result_heading = self._label("2. 항목별 비교 결과 (검수 보조)", "section")
-        sections.addWidget(self.result_heading)
+        self._panels = {}
+        result_panel = QFrame()
+        result_panel.setObjectName("sectionCard")
+        result_layout = QVBoxLayout(result_panel)
+        result_layout.setContentsMargins(7, 5, 7, 6)
+        result_layout.setSpacing(5)
+        self.result_heading = QPushButton("▾  항목별 비교 결과 (검수 보조)")
+        self.result_heading.setObjectName("section_toggle")
+        self.result_heading.setCheckable(True)
+        self.result_heading.setChecked(True)
+        result_layout.addWidget(self.result_heading)
+        result_body = QWidget()
+        result_body_layout = QVBoxLayout(result_body)
+        result_body_layout.setContentsMargins(0, 0, 0, 0)
+        result_body_layout.setSpacing(5)
         self.geometry_result = self._label("분석 전 · 최종 사람 검수 필요", "decision")
-        sections.addWidget(self.geometry_result)
+        result_body_layout.addWidget(self.geometry_result)
         self.analysis_details = QTextEdit()
         self.analysis_details.setReadOnly(True)
-        self.analysis_details.setMinimumHeight(115)
         self.analysis_details.setPlaceholderText(
             "진입 전: 정지선 / 차로 수 / 화살표 / 컬러유도선\n"
             "진입 후 좌·직·우: 도로 유무 / 차로 수 / 일반·컬러유도선"
         )
-        sections.addWidget(self.analysis_details, 1)
+        result_body_layout.addWidget(self.analysis_details, 1)
+        result_layout.addWidget(result_body, 1)
+        self.panel_splitter.addWidget(result_panel)
+        self._panels["result"] = (
+            result_body, self.result_heading, "항목별 비교 결과 (검수 보조)", 1,
+        )
+        self.result_heading.toggled.connect(
+            lambda expanded: self._toggle_panel("result", expanded)
+        )
 
-        layout.addWidget(self._label("작업 로그", "section"))
+        log_panel = QFrame()
+        log_panel.setObjectName("sectionCard")
+        log_layout = QVBoxLayout(log_panel)
+        log_layout.setContentsMargins(7, 5, 7, 6)
+        log_layout.setSpacing(5)
+        self.logs_heading = QPushButton("▾  작업 로그")
+        self.logs_heading.setObjectName("section_toggle")
+        self.logs_heading.setCheckable(True)
+        self.logs_heading.setChecked(True)
+        log_layout.addWidget(self.logs_heading)
+        log_body = QWidget()
+        log_body_layout = QVBoxLayout(log_body)
+        log_body_layout.setContentsMargins(0, 0, 0, 0)
         self.logs = QTextEdit()
         self.logs.setReadOnly(True)
-        self.logs.setMinimumHeight(78)
-        layout.addWidget(self.logs, 1)
+        log_body_layout.addWidget(self.logs)
+        log_layout.addWidget(log_body, 1)
+        self.panel_splitter.addWidget(log_panel)
+        self._panels["logs"] = (log_body, self.logs_heading, "작업 로그", 2)
+        self.logs_heading.toggled.connect(
+            lambda expanded: self._toggle_panel("logs", expanded)
+        )
+        self.panel_splitter.setStretchFactor(0, 2)
+        self.panel_splitter.setStretchFactor(1, 3)
+        self.panel_splitter.setStretchFactor(2, 2)
+        QTimer.singleShot(0, lambda: self.panel_splitter.setSizes([270, 205, 135]))
         self._log_relay = _UILogRelay(self)
         self._log_relay.line_ready.connect(self._append_log_line)
         self._log_handler = _UILogHandler(self._log_relay)
