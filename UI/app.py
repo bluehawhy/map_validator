@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from .image_preview import EvidencePreview
+from .individual_review_controls import IndividualReviewControls
 from map_validator.app_logging import (
     AppLogFormatter,
     LOG_DIR,
@@ -294,6 +294,7 @@ class MainWindow(QMainWindow):
         output_browse.clicked.connect(self._select_output)
         self.output_input.editingFinished.connect(self._save_settings)
         self.output_input.editingFinished.connect(self._refresh_stage_states)
+        self.output_input.editingFinished.connect(self._refresh_individual_items)
         output_row.addWidget(self._label("저장 경로"))
         output_row.addWidget(self.output_input, 1)
         output_row.addWidget(output_browse)
@@ -373,44 +374,27 @@ class MainWindow(QMainWindow):
         sections.addLayout(actions)
         sections.addStretch(1)
 
-        # Independent one-shot review of an input_tool capture at the red marker.
-        individual_page = QWidget()
-        individual_layout = QVBoxLayout(individual_page)
-        individual_layout.setContentsMargins(9, 8, 9, 8)
-        individual_layout.setSpacing(6)
-        individual_note = self._label(
-            "현재 input_tool 화면을 WGC 촬영하고 도면 중앙의 작은 빨간 사각 표시를 "
-            "현재 위치 후보로 찾습니다. 주변 시안색 정지선·노란 중앙선 후보를 함께 표시합니다.",
-            "hint",
-        )
-        individual_note.setWordWrap(True)
-        individual_layout.addWidget(individual_note)
-        self.individual_capture_btn = QPushButton("개별 촬영 · 정지선/중앙선 분석")
-        self.individual_capture_btn.setObjectName("primary")
-        self.individual_capture_btn.setToolTip(
-            "기존 단계별 촬영을 변경하지 않고 현재 input_tool 화면을 별도로 저장합니다."
-        )
+        # Capture-only workflow and separate review of saved input_tool images.
+        self.individual_controls = IndividualReviewControls()
+        self.individual_capture_btn = self.individual_controls.capture_button
+        self.individual_analyze_btn = self.individual_controls.analyze_button
+        self.individual_overlay_btn = self.individual_controls.overlay_button
+        self.individual_status = self.individual_controls.status_label
+        self.individual_details = self.individual_controls.details
+        self._individual_overlay_path = None
         self.individual_capture_btn.clicked.connect(
             lambda: self._start("capture_individual")
         )
-        individual_layout.addWidget(self.individual_capture_btn)
-        self.individual_status = self._label("개별 촬영 전 · 현재 위치 미확인", "hint")
-        self.individual_status.setWordWrap(True)
-        individual_layout.addWidget(self.individual_status)
-        self.individual_overlay_btn = QPushButton("빨간 점 · 근거 이미지 보기")
-        self.individual_overlay_btn.setEnabled(False)
-        self.individual_overlay_btn.clicked.connect(self._open_individual_overlay)
-        individual_layout.addWidget(self.individual_overlay_btn)
-        self.individual_preview = EvidencePreview()
-        individual_layout.addWidget(self.individual_preview)
-        self._individual_overlay_path = None
-        self.individual_details = QTextEdit()
-        self.individual_details.setReadOnly(True)
-        self.individual_details.setPlaceholderText(
-            "개별 촬영 후 현재 위치의 픽셀 좌표, 도면 중심과의 거리, 정지선 후보를 표시합니다."
+        self.individual_analyze_btn.clicked.connect(
+            lambda: self._start("analyze_individual")
         )
-        individual_layout.addWidget(self.individual_details, 1)
-        self.capture_tabs.addTab(individual_page, "개별 촬영 분석")
+        self.individual_controls.selection_changed.connect(
+            self._on_individual_selection_changed
+        )
+        self.individual_controls.refresh_button.clicked.connect(
+            self._refresh_individual_items
+        )
+        self.capture_tabs.addTab(self.individual_controls, "개별 촬영")
 
         self._panels = {}
         result_panel = QFrame()
@@ -494,6 +478,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(footer)
         self.case_input.textChanged.connect(self._refresh_stage_states)
         self._refresh_stage_states()
+        self._refresh_individual_items()
         self._log("준비 완료. 진입 전→좌→직→우 네 방향을 각각 수동 촬영하세요.")
 
     @staticmethod
@@ -675,6 +660,7 @@ class MainWindow(QMainWindow):
             # Folder-picker changes do not fire editingFinished on QLineEdit.
             self._save_settings()
             self._refresh_stage_states()
+            self._refresh_individual_items()
 
     def _start_review_monitor(self) -> None:
         from .review_monitor import ReviewSelectionMonitor
@@ -795,11 +781,6 @@ class MainWindow(QMainWindow):
             self._displayed_case_id = current_id
             self.geometry_result.setText("검수 ID 변경 · 촬영본 분석 전")
             self.analysis_details.clear()
-            self.individual_status.setText("개별 촬영 전 · 현재 위치 미확인")
-            self.individual_details.clear()
-            self.individual_preview.clear_evidence()
-            self._individual_overlay_path = None
-            self.individual_overlay_btn.setEnabled(False)
             self.latest_folder = None
             self.folder_btn.setEnabled(False)
 
@@ -826,24 +807,55 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             log_exception_at_source(APP_LOG, "검수 단계 상태 읽기 실패", exc)
 
+    def _refresh_individual_items(self, _text: str = "", preferred=None) -> None:
+        configured = Path(self.output_input.text().strip() or "results").expanduser()
+        root = configured if configured.is_absolute() else ROOT / configured
+        self.individual_controls.reload(root, preferred=preferred)
+
+    def _on_individual_selection_changed(self, selection) -> None:
+        self._individual_overlay_path = None
+        self.individual_controls.set_overlay(None)
+        self.individual_details.clear()
+        if selection is None:
+            self.individual_status.setText("저장 경로에 개별 촬영본이 없습니다.")
+            return
+        folder, revision = selection
+        self.individual_status.setText(
+            f"선택: {folder.name} · r{revision:03d} · 정지선 분석 가능"
+        )
+        report = folder / f"individual_analysis_r{revision:03d}.json"
+        if not report.is_file():
+            return
+        try:
+            previous = json.loads(report.read_text(encoding="utf-8"))
+            if int(previous.get("revision", -1)) != revision:
+                return
+            self._show_result({"kind": "individual_analysis", "folder": str(folder),
+                               **previous})
+        except (ValueError, OSError, KeyError) as exc:
+            self._log(f"저장된 분석 결과 불러오기 실패: {exc}", logging.WARNING)
+
     def _start(self, action: str) -> None:
         if self.worker is not None and self.worker.isRunning():
             return
         try:
             from map_validator.stage_types import STAGES
 
-            valid = {"analyze_staged", "capture_individual"} | {"capture_" + stage for stage in STAGES}
+            valid = {"analyze_staged", "capture_individual", "analyze_individual"} | {"capture_" + stage for stage in STAGES}
             if action not in valid:
                 raise ValueError(f"지원하지 않는 작업입니다: {action}")
             cfg = self._current_settings()
             case_id = self.case_input.text().strip()
-            if action != "capture_individual" and not case_id and not cfg["windows"].get(
+            selected = self.individual_controls.current_selection() if action == "analyze_individual" else None
+            if action == "analyze_individual" and selected is None:
+                raise ValueError("먼저 저장 경로의 촬영 항목을 선택하세요.")
+            if action not in ("capture_individual", "analyze_individual") and not case_id and not cfg["windows"].get(
                 "intersection_review_title", ""
             ).strip():
                 raise ValueError(
                     "검수 ID가 없습니다. 교차로 선형 검수에서 Polygon/Link를 선택하세요."
                 )
-            if action != "analyze_staged":
+            if action not in ("analyze_staged", "analyze_individual"):
                 if action != "capture_individual" and not cfg["windows"]["roadview_title"].strip():
                     raise ValueError("로드뷰 창 제목을 입력하세요.")
                 if not cfg["windows"]["work_title"].strip():
@@ -854,6 +866,8 @@ class MainWindow(QMainWindow):
             self.worker = ControlWorker(
                 config=cfg, config_dir=ROOT, case_id=case_id,
                 action=action, parent=self,
+                individual_folder=selected[0] if selected else None,
+                individual_revision=selected[1] if selected else None,
             )
             self.worker.progress.connect(self.status_label.setText)
             self.worker.case_id_ready.connect(self._on_analysis_case_id)
@@ -876,7 +890,9 @@ class MainWindow(QMainWindow):
     def _busy(self, busy: bool) -> None:
         for widget in (
             *self.stage_buttons.values(), self.start_btn,
-            self.individual_capture_btn, self.individual_overlay_btn, self.save_btn,
+            self.individual_capture_btn, self.individual_analyze_btn,
+            self.individual_overlay_btn, self.individual_controls.combo,
+            self.individual_controls.refresh_button, self.save_btn,
             self.settings_btn,
             self.case_input, self.work_input, self.view_input,
             self.work_select_btn, self.view_select_btn, self.review_select_btn,
@@ -885,9 +901,11 @@ class MainWindow(QMainWindow):
         ):
             widget.setEnabled(not busy)
         self.individual_overlay_btn.setEnabled(
-            not busy
-            and self._individual_overlay_path is not None
+            not busy and self._individual_overlay_path is not None
             and self._individual_overlay_path.is_file()
+        )
+        self.individual_analyze_btn.setEnabled(
+            not busy and self.individual_controls.current_selection() is not None
         )
         self.stop_btn.setEnabled(busy)
         if self.review_monitor is not None:
@@ -932,19 +950,29 @@ class MainWindow(QMainWindow):
             self.geometry_result.setText("사진 변경됨 · 촬영본 분석을 다시 실행하세요")
             self.analysis_details.clear()
             self._refresh_stage_states()
+        elif kind == "individual_capture":
+            self.capture_tabs.setCurrentIndex(1)
+            self._refresh_individual_items(
+                preferred=(Path(result["folder"]), int(result["revision"]))
+            )
+            self._individual_overlay_path = None
+            self.individual_overlay_btn.setEnabled(False)
+            self.individual_details.clear()
+            self.individual_status.setText(
+                f"개별 촬영 r{result['revision']:03d} 저장됨 · 사진 선택 후 정지선 분석"
+            )
+            self._log(f"개별 원본 촬영 저장: {result['input_tool_image']}")
         elif kind == "individual_analysis":
             self.capture_tabs.setCurrentIndex(1)
             self._individual_overlay_path = (
                 Path(result["folder"]) / result["input_tool_overlay"]
             )
-            self.individual_overlay_btn.setEnabled(
-                self._individual_overlay_path.is_file()
-            )
+            self.individual_controls.set_overlay(self._individual_overlay_path)
             focus_path = (
                 Path(result["folder"])
                 / result.get("input_tool_focus", result["input_tool_overlay"])
             )
-            self.individual_preview.set_evidence(focus_path)
+            # Full-resolution evidence opens in a popup instead of an inline preview.
             marker = result.get("red_marker", {})
             point = marker.get("point")
             stop = result.get("checks", {}).get("stop_line", {})
@@ -1201,9 +1229,7 @@ class MainWindow(QMainWindow):
         self.analysis_details.verticalScrollBar().setValue(0)
 
     def _open_individual_overlay(self) -> None:
-        path = self._individual_overlay_path
-        if path is not None and path.is_file():
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        self.individual_controls.open_evidence(self._individual_overlay_path)
 
     def _open_folder(self) -> None:
         if self.latest_folder and Path(self.latest_folder).is_dir():

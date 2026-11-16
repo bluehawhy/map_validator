@@ -31,12 +31,15 @@ class ControlWorker(QThread):
     def __init__(
         self, config: dict, config_dir: Path, case_id: str,
         action: str, movement: str = "none", steps: int = 0, parent=None,
+        individual_folder: Path | None = None, individual_revision: int | None = None,
     ) -> None:
         super().__init__(parent)
         self.config = config
         self.config_dir = config_dir
         self.case_id = case_id
         self.action = action
+        self.individual_folder = individual_folder
+        self.individual_revision = individual_revision
         self._stop = threading.Event()
 
     def _progress(self, message: str) -> None:
@@ -111,19 +114,33 @@ class ControlWorker(QThread):
                 case_id = validate_case_id(self.case_id)
                 folder = output_root / case_id
             self._check_stop()
-            self._progress("개별 촬영: input_tool 현재 화면 WGC 저장 및 빨간 점 기준 검출")
+            self._progress("개별 촬영: input_tool 현재 화면 WGC 원본 저장")
             work = find_window(self.config["windows"]["work_title"])
             image = capture_window(work)
             self._check_stop()
-            from map_validator.individual_capture import capture_and_analyze
+            from map_validator.individual_capture import capture_individual
 
-            result = capture_and_analyze(
-                folder, case_id, image, unassigned=unassigned
-            )
-            self._progress(
-                f"개별 분석 저장 완료 (버전 {result['revision']}) · "
-                f"기준점 {result['red_marker']['status']}"
-            )
+            result = capture_individual(folder, case_id, image, unassigned=unassigned)
+            self._progress(f"개별 원본 촬영 완료 (버전 {result['revision']}) · 분석 전")
+            self.result_ready.emit(result)
+            return
+
+        if self.action == "analyze_individual":
+            root = output_root.resolve()
+            selected_folder = self.individual_folder
+            revision = self.individual_revision
+            if selected_folder is None or revision is None:
+                raise ValueError("분석할 저장 폴더와 촬영 버전을 선택하세요.")
+            folder = selected_folder.resolve()
+            if folder.parent != root and folder.parent != root / "_unassigned_individual":
+                raise ValueError("분석 대상 폴더가 설정된 저장 경로 밖에 있습니다.")
+            if selected_folder.is_symlink():
+                raise ValueError("심볼릭 링크 촬영 폴더는 분석할 수 없습니다.")
+            self._check_stop()
+            from map_validator.individual_capture import analyze_individual
+
+            result = analyze_individual(folder, validate_case_id(folder.name), revision)
+            self._progress(f"기존 촬영본 r{revision:03d} 분석 결과 갱신 완료")
             self.result_ready.emit(result)
             return
 

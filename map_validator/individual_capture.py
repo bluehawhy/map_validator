@@ -34,11 +34,12 @@ def _write_json(path: Path, data: dict) -> None:
 
 
 def capture_and_analyze(
-    folder: Path, case_id: str, input_tool_image: np.ndarray,
-    *, unassigned: bool = False,
+    folder: Path, case_id: str, input_tool_image: np.ndarray | None,
+    *, unassigned: bool = False, capture_only: bool = False,
+    existing_revision: int | None = None,
 ) -> dict:
     validate_case_id(case_id)
-    if input_tool_image is None or input_tool_image.size == 0:
+    if existing_revision is None and (input_tool_image is None or input_tool_image.size == 0):
         raise ValueError("input_tool 촬영 이미지가 비었습니다.")
     target_dir = folder / "captures" / "individual"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -48,24 +49,57 @@ def capture_and_analyze(
     }
     if manifest.get("schema_version") != 1 or manifest.get("case_id") != case_id:
         raise ValueError("개별 촬영 기록의 검수 ID 또는 버전이 일치하지 않습니다.")
-    revision = len(manifest.get("history", [])) + 1
-    while (target_dir / f"input_tool_r{revision:03d}.png").exists():
-        revision += 1
+    if existing_revision is None:
+        revision = len(manifest.get("history", [])) + 1
+        while (target_dir / f"input_tool_r{revision:03d}.png").exists():
+            revision += 1
+    else:
+        revision = int(existing_revision)
+        if revision < 1 or not any(int(entry.get("revision", -1)) == revision
+                                   for entry in manifest.get("history", [])):
+            raise ValueError("선택한 개별 촬영 버전이 저장 목록에 없습니다.")
 
     raw_path = target_dir / f"input_tool_r{revision:03d}.png"
     overlay_path = target_dir / f"input_tool_r{revision:03d}_overlay.png"
     focus_path = target_dir / f"input_tool_r{revision:03d}_focus.png"
-    ok, encoded_frame = cv2.imencode(".png", input_tool_image)
-    if not ok:
-        raise RuntimeError("촬영 이미지 PNG 인코딩에 실패했습니다.")
-    encoded = encoded_frame.tobytes()
-    temp_path = raw_path.with_suffix(".png.tmp")
-    try:
-        with temp_path.open("xb") as stream:
-            stream.write(encoded)
-        os.replace(temp_path, raw_path)
-    finally:
-        temp_path.unlink(missing_ok=True)
+    if existing_revision is None:
+        ok, encoded_frame = cv2.imencode(".png", input_tool_image)
+        if not ok:
+            raise RuntimeError("촬영 이미지 PNG 인코딩에 실패했습니다.")
+        temp_path = raw_path.with_suffix(".png.tmp")
+        try:
+            with temp_path.open("xb") as stream:
+                stream.write(encoded_frame.tobytes())
+            os.replace(temp_path, raw_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+        captured_at = datetime.now(timezone.utc).isoformat()
+        manifest.setdefault("history", []).append({
+            "revision": revision,
+            "captured_at_utc": captured_at,
+            "input_tool_image": raw_path.relative_to(folder).as_posix(),
+        })
+        _write_json(manifest_path, manifest)
+        if capture_only:
+            return {
+                "kind": "individual_capture", "folder": str(folder),
+                "case_id": case_id, "revision": revision,
+                "unassigned": unassigned,
+                "input_tool_image": raw_path.relative_to(folder).as_posix(),
+                "captured_at_utc": captured_at,
+            }
+    else:
+        if not raw_path.is_file() or raw_path.is_symlink():
+            raise FileNotFoundError("선택한 원본 촬영 PNG가 존재하지 않습니다.")
+        encoded = np.fromfile(str(raw_path), dtype=np.uint8)
+        input_tool_image = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+        if input_tool_image is None:
+            raise ValueError("선택한 촬영 PNG를 읽을 수 없습니다.")
+        captured_at = next(
+            entry.get("captured_at_utc")
+            for entry in manifest["history"]
+            if int(entry.get("revision", -1)) == revision
+        )
 
     APP_LOG.info(
         "[개별촬영][위치진단] 촬영버전=%d input_tool이미지=%dx%d "
@@ -168,7 +202,8 @@ def capture_and_analyze(
         "schema_version": 1, "case_id": case_id, "revision": revision,
         "unassigned": unassigned,
         "case_id_status": "unassigned" if unassigned else "assigned",
-        "captured_at_utc": now, "source": "input_tool_manual_wgc",
+        "captured_at_utc": captured_at, "analyzed_at_utc": now,
+        "source": "input_tool_manual_wgc",
         "input_tool_image": raw_path.relative_to(folder).as_posix(),
         "input_tool_overlay": overlay_path.relative_to(folder).as_posix(),
         "input_tool_focus": focus_path.relative_to(folder).as_posix(),
@@ -211,11 +246,11 @@ def capture_and_analyze(
     history_path = folder / f"individual_analysis_r{revision:03d}.json"
     _write_json(history_path, record)
     _write_json(folder / "individual_analysis.json", record)
-    manifest.setdefault("history", []).append({
-        "revision": revision, "captured_at_utc": now,
-        "input_tool_image": record["input_tool_image"],
-        "analysis": history_path.name,
-    })
+    for entry in manifest["history"]:
+        if int(entry.get("revision", -1)) == revision:
+            entry["analysis"] = history_path.name
+            entry["analyzed_at_utc"] = now
+            break
     _write_json(manifest_path, manifest)
     APP_LOG.info(
         "[개별촬영][위치진단] 완료 촬영버전=%d 원본=%s 근거오버레이=%s "
@@ -227,3 +262,19 @@ def capture_and_analyze(
         "kind": "individual_analysis", "folder": str(folder), "case_id": case_id,
         **record,
     }
+
+def capture_individual(
+    folder: Path, case_id: str, image: np.ndarray, *, unassigned: bool = False,
+) -> dict:
+    """Save an immutable WGC frame and manifest entry, without analysis."""
+    return capture_and_analyze(folder, case_id, image,
+                               unassigned=unassigned, capture_only=True)
+
+
+def analyze_individual(folder: Path, case_id: str, revision: int) -> dict:
+    """Recompute a selected saved photo, replacing only this version's derived files."""
+    return capture_and_analyze(
+        folder, case_id, None,
+        unassigned=folder.parent.name == "_unassigned_individual",
+        existing_revision=revision,
+    )
