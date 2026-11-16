@@ -34,6 +34,7 @@ def _write_json(path: Path, data: dict) -> None:
 
 def capture_and_analyze(
     folder: Path, case_id: str, input_tool_image: np.ndarray,
+    *, unassigned: bool = False,
 ) -> dict:
     validate_case_id(case_id)
     if input_tool_image is None or input_tool_image.size == 0:
@@ -139,6 +140,8 @@ def capture_and_analyze(
     now = datetime.now(timezone.utc).isoformat()
     record = {
         "schema_version": 1, "case_id": case_id, "revision": revision,
+        "unassigned": unassigned,
+        "case_id_status": "unassigned" if unassigned else "assigned",
         "captured_at_utc": now, "source": "input_tool_manual_wgc",
         "input_tool_image": raw_path.relative_to(folder).as_posix(),
         "input_tool_overlay": overlay_path.relative_to(folder).as_posix(),
