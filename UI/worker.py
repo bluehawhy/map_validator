@@ -117,9 +117,9 @@ class ControlWorker(QThread):
             self._check_stop()
             from map_validator.individual_capture import capture_and_analyze
 
-            result = capture_and_analyze(folder, case_id, image)
-            result["unassigned"] = unassigned
-            result["case_id_status"] = "unassigned" if unassigned else "assigned"
+            result = capture_and_analyze(
+                folder, case_id, image, unassigned=unassigned
+            )
             self._progress(
                 f"개별 분석 저장 완료 (버전 {result['revision']}) · "
                 f"기준점 {result['red_marker']['status']}"
