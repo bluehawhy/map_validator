@@ -4,12 +4,39 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPainter, QPixmap
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QComboBox, QDialog, QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel, QPushButton,
     QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
 )
+
+
+class ZoomEvidenceView(QGraphicsView):
+    """Ctrl + mouse wheel zooms around the cursor; wheel and drag pan."""
+
+    def __init__(self, pixmap: QPixmap, parent=None) -> None:
+        super().__init__(parent)
+        scene = QGraphicsScene(self)
+        scene.addPixmap(pixmap)
+        self.setScene(scene)
+        self._zoom = 1.0
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setToolTip("Ctrl + 마우스 휠: 확대/축소 · 휠/드래그: 이동")
+
+    def wheelEvent(self, event) -> None:
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            steps = event.angleDelta().y() / 120.0
+            if steps:
+                target = max(0.2, min(8.0, self._zoom * (1.2 ** steps)))
+                self.scale(target / self._zoom, target / self._zoom)
+                self._zoom = target
+            event.accept()
+            return
+        super().wheelEvent(event)
 
 
 class IndividualReviewControls(QWidget):
@@ -156,13 +183,10 @@ class IndividualReviewControls(QWidget):
         dialog.setWindowTitle(f"근거 이미지 · {path.name}")
         dialog.resize(1050, 750)
         dialog_layout = QVBoxLayout(dialog)
-        scroll = QScrollArea(dialog)
-        scroll.setWidgetResizable(False)
-        image = QLabel()
-        image.setPixmap(pixmap)
-        image.setFixedSize(pixmap.size())
-        scroll.setWidget(image)
-        dialog_layout.addWidget(scroll)
+        hint = QLabel("Ctrl + 마우스 휠: 확대/축소  |  휠: 스크롤  |  드래그: 이동")
+        dialog_layout.addWidget(hint)
+        viewer = ZoomEvidenceView(pixmap, dialog)
+        dialog_layout.addWidget(viewer, 1)
         close = QPushButton("닫기")
         close.clicked.connect(dialog.accept)
         dialog_layout.addWidget(close)
