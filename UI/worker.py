@@ -93,6 +93,21 @@ class ControlWorker(QThread):
         ) / case_id
         self._check_stop()
 
+        if self.action == "capture_individual":
+            self._progress("개별 촬영: input_tool 현재 화면 WGC 저장 및 빨간 점 기준 검출")
+            work = find_window(self.config["windows"]["work_title"])
+            image = capture_window(work)
+            self._check_stop()
+            from map_validator.individual_capture import capture_and_analyze
+
+            result = capture_and_analyze(folder, case_id, image)
+            self._progress(
+                f"개별 분석 저장 완료 (버전 {result['revision']}) · "
+                f"기준점 {result['red_marker']['status']}"
+            )
+            self.result_ready.emit(result)
+            return
+
         if self.action.startswith("capture_"):
             stage = self.action[len("capture_"):]
             if stage not in STAGES:
