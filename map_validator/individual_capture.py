@@ -50,9 +50,10 @@ def capture_and_analyze(
 
     raw_path = target_dir / f"input_tool_r{revision:03d}.png"
     overlay_path = target_dir / f"input_tool_r{revision:03d}_overlay.png"
-    if not cv2.imencode(".png", input_tool_image)[0]:
+    ok, encoded_frame = cv2.imencode(".png", input_tool_image)
+    if not ok:
         raise RuntimeError("촬영 이미지 PNG 인코딩에 실패했습니다.")
-    encoded = cv2.imencode(".png", input_tool_image)[1].tobytes()
+    encoded = encoded_frame.tobytes()
     temp_path = raw_path.with_suffix(".png.tmp")
     try:
         with temp_path.open("xb") as stream:
@@ -84,7 +85,19 @@ def capture_and_analyze(
         "captured_at_utc": now, "source": "input_tool_manual_wgc",
         "input_tool_image": raw_path.relative_to(folder).as_posix(),
         "input_tool_overlay": overlay_path.relative_to(folder).as_posix(),
-        "red_marker": marker, "checks": {"stop_line": stop_line},
+        "red_marker": marker,
+        "location": {
+            "reference": "input_tool_red_marker",
+            "image_size": [int(input_tool_image.shape[1]), int(input_tool_image.shape[0])],
+            "image_point": point,
+            "normalized_point": (
+                [round(point[0] / input_tool_image.shape[1], 6),
+                 round(point[1] / input_tool_image.shape[0], 6)]
+                if point is not None else None
+            ),
+            "road_id": None, "angle_deg": None,
+        },
+        "checks": {"stop_line": stop_line},
         "human_review": "requires_human_review",
         "warning": "정지선 후보는 확정 판정이 아닙니다. 위치 기준점과 선형은 현장 사진으로 검증해야 합니다.",
     }
