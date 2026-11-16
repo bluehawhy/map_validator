@@ -98,10 +98,20 @@ def capture_and_analyze(
         )
     stop_line = local_stop_line_candidates(input_tool_image, point, overlay)
     APP_LOG.info(
-        "[개별촬영][위치진단] 주변정지선분석=%s 분석ROI=%s 시안색선후보=%d",
+        "[개별촬영][위치진단] 주변정지선분석=%s 분석ROI=%s "
+        "시안색선조각=%d 선그룹후보=%d 총검출=%s 그룹화완료=%s",
         "진행" if point is not None else "건너뜀(위치미확인)",
         stop_line.get("roi"), len(stop_line.get("line_candidates", [])),
+        len(stop_line.get("line_groups", [])),
+        stop_line.get("total_segments", 0),
+        stop_line.get("grouping_complete", False),
     )
+    for group in stop_line.get("line_groups", []):
+        APP_LOG.info(
+            "[개별촬영][선그룹] %s 구성=%s 방향=%s 길이=%spx 좌표=%s",
+            group["group_id"], ",".join(group["member_ids"]),
+            group["angle_deg"], group["length_px"], group["endpoints"],
+        )
     ok, encoded_overlay = cv2.imencode(".png", overlay)
     if not ok:
         raise RuntimeError("분석 근거 이미지 PNG 인코딩에 실패했습니다.")
