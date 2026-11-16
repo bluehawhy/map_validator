@@ -16,8 +16,8 @@ STAGE_BUTTONS = {
     "after_straight": "진입 후 · 직 촬영",
     "after_right": "진입 후 · 우 촬영",
 }
-BEFORE_FIELDS = ("stop_line", "entry_lane_count", "lane_arrows", "colored_guidance")
-AFTER_FIELDS = ("road_exists", "exit_lane_count", "guidance_line", "colored_guidance")
+BEFORE_FIELDS = ("stop_line", "entry_lane_count", "lane_arrows", "guidance_line", "colored_guidance")
+AFTER_FIELDS = ("road_exists", "exit_lane_count", "stop_line", "guidance_line", "colored_guidance")
 FIELD_LABELS = {
     "stop_line": "정지선",
     "entry_lane_count": "진입 차로 수",
