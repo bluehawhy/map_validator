@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from ..findings import unknown
+from ..line_grouping import group_line_segments
 
 
 def local_stop_line_candidates(
@@ -59,11 +60,22 @@ def local_stop_line_candidates(
     lines.sort(key=lambda line: line["length_px"], reverse=True)
     total_segments = len(lines)
     lines = lines[:24]
+    # The geometry grouping is shared with future lane/centre-line detectors.
+    # S# denotes raw Hough fragments; G# denotes geometrically aligned groups.
+    for index, line in enumerate(lines, 1):
+        line["candidate_id"] = f"S{index}"
+    groups = group_line_segments(lines)
+    member_groups = {
+        member_id: group["group_id"]
+        for group in groups for member_id in group["member_ids"]
+    }
+    for line in lines:
+        line["group_id"] = member_groups[line["candidate_id"]]
+
     # Show the evidence for every detected Hough segment, not just a count.
     # S1..SN match the serialized list and the UI's details panel.
     occupied_labels: list[tuple[int, int, int, int]] = []
     for index, line in enumerate(lines, start=1):
-        line["candidate_id"] = f"S{index}"
         a, b = line["endpoints"]
         cv2.line(overlay, tuple(a), tuple(b), (0, 255, 255), 3, cv2.LINE_AA)
         for endpoint in (a, b):
@@ -90,10 +102,33 @@ def local_stop_line_candidates(
         cv2.putText(overlay, label, (tx, ty), font, scale, (255, 255, 255),
                     thickness, cv2.LINE_AA)
 
+    # Draw each fitted group line in magenta, with a separate green G# tag.
+    # The S# labels remain visible for inspecting merges / false positives.
+    for group in groups:
+        first, last = group["endpoints"]
+        a = tuple(round(value) for value in first)
+        b = tuple(round(value) for value in last)
+        cv2.line(overlay, a, b, (230, 80, 230), 2, cv2.LINE_AA)
+        center_x = round((a[0] + b[0]) / 2)
+        center_y = round((a[1] + b[1]) / 2)
+        label = group["group_id"]
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale, thickness = .7, 2
+        (tw, th), baseline = cv2.getTextSize(label, font, scale, thickness)
+        # Offset the group label away from the line and pre-existing S# tags.
+        y = max(th + 6, min(center_y - 24, height - baseline - 5))
+        x = max(2, min(center_x + 12, width - tw - 6))
+        cv2.rectangle(overlay, (x - 4, y - th - 4),
+                      (x + tw + 4, y + baseline + 4), (20, 20, 20), -1)
+        cv2.rectangle(overlay, (x - 4, y - th - 4),
+                      (x + tw + 4, y + baseline + 4), (30, 255, 120), 1)
+        cv2.putText(overlay, label, (x, y), font, scale,
+                    (30, 255, 120), thickness, cv2.LINE_AA)
+
     return {
         "value": None,
         "confidence": None,
-        "method": "red_marker_local_cyan_lines_v2_wide_roi",
+        "method": "red_marker_local_cyan_lines_v3_grouped_wide_roi",
         "reason": ("빨간 기준점 주변의 시안색 선 후보입니다. 정지선/도로 경계의 구별은 수동 검증이 필요합니다."
                    if lines else "빨간 기준점 주변에서 시안색 선 후보를 찾지 못했습니다. 정지선 없음으로 확정하지 않습니다."),
         "roi": [x0, y0, x1, y1],
@@ -101,4 +136,13 @@ def local_stop_line_candidates(
         "shown_segments": len(lines),
         "omitted_segments": max(0, total_segments - len(lines)),
         "line_candidates": lines,
+        "line_groups": groups,
+        "group_count": len(groups),
+        "grouping_complete": total_segments == len(lines),
+        "grouping_rules": {
+            "angle_tolerance_deg": 8.0,
+            "perpendicular_tolerance_px": 6.0,
+            "max_axial_gap_px": 12.0,
+            "requires_overlap_or_short_gap": True,
+        },
     }
