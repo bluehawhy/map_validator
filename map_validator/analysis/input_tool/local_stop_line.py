@@ -45,9 +45,36 @@ def local_stop_line_candidates(
             lines.append({"endpoints": endpoints, "length_px": round(distance, 1)})
     lines.sort(key=lambda line: line["length_px"], reverse=True)
     lines = lines[:12]
-    for line in lines:
+    # Show the evidence for every detected Hough segment, not just a count.
+    # S1..SN match the serialized list and the UI's details panel.
+    occupied_labels: list[tuple[int, int, int, int]] = []
+    for index, line in enumerate(lines, start=1):
+        line["candidate_id"] = f"S{index}"
         a, b = line["endpoints"]
-        cv2.line(overlay, tuple(a), tuple(b), (0, 220, 255), 2)
+        cv2.line(overlay, tuple(a), tuple(b), (0, 255, 255), 3, cv2.LINE_AA)
+        for endpoint in (a, b):
+            cv2.circle(overlay, tuple(endpoint), 4, (0, 110, 255), -1, cv2.LINE_AA)
+
+        label = line["candidate_id"]
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale, thickness = .65, 2
+        (tw, th), baseline = cv2.getTextSize(label, font, scale, thickness)
+        mid_x = round((a[0] + b[0]) / 2)
+        mid_y = round((a[1] + b[1]) / 2)
+        for dx, dy in ((8, -10), (-tw - 8, -10), (8, 24), (-tw - 8, 24), (8, -32)):
+            tx = max(2, min(mid_x + dx, width - tw - 7))
+            ty = max(th + 5, min(mid_y + dy, height - baseline - 5))
+            box = (tx - 3, ty - th - 3, tx + tw + 3, ty + baseline + 3)
+            if not any(not (
+                box[2] < prev[0] or box[0] > prev[2]
+                or box[3] < prev[1] or box[1] > prev[3]
+            ) for prev in occupied_labels):
+                break
+        occupied_labels.append(box)
+        cv2.rectangle(overlay, (box[0], box[1]), (box[2], box[3]), (20, 20, 20), -1)
+        cv2.rectangle(overlay, (box[0], box[1]), (box[2], box[3]), (0, 255, 255), 1)
+        cv2.putText(overlay, label, (tx, ty), font, scale, (255, 255, 255),
+                    thickness, cv2.LINE_AA)
 
     return {
         "value": None,

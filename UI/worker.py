@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -87,26 +89,47 @@ class ControlWorker(QThread):
 
     def _run_job(self) -> None:
         self._check_stop()
-        case_id = self._resolve_case_id()
-        folder = self._path(
+        output_root = self._path(
             self.config.get("output", {}).get("directory", "results")
-        ) / case_id
-        self._check_stop()
-
+        )
         if self.action == "capture_individual":
+            # Marker/line recognition must never depend on the slow Win32/UIA
+            # Polygon/Link lookup. A missing ID is not a failed screenshot.
+            unassigned = not bool(self.case_id.strip())
+            if unassigned:
+                case_id = (
+                    "Unassigned_" + datetime.now(timezone.utc).strftime(
+                        "%Y%m%d_%H%M%S_%f"
+                    ) + "_" + uuid4().hex[:6]
+                )
+                folder = output_root / "_unassigned_individual" / case_id
+                APP_LOG.warning(
+                    "개별 촬영: 검수 ID 없음 · 자동 조회 없이 고유 임시 폴더로 저장: %s",
+                    folder.name,
+                )
+            else:
+                case_id = validate_case_id(self.case_id)
+                folder = output_root / case_id
+            self._check_stop()
             self._progress("개별 촬영: input_tool 현재 화면 WGC 저장 및 빨간 점 기준 검출")
             work = find_window(self.config["windows"]["work_title"])
             image = capture_window(work)
             self._check_stop()
             from map_validator.individual_capture import capture_and_analyze
 
-            result = capture_and_analyze(folder, case_id, image)
+            result = capture_and_analyze(
+                folder, case_id, image, unassigned=unassigned
+            )
             self._progress(
                 f"개별 분석 저장 완료 (버전 {result['revision']}) · "
                 f"기준점 {result['red_marker']['status']}"
             )
             self.result_ready.emit(result)
             return
+
+        case_id = self._resolve_case_id()
+        folder = output_root / case_id
+        self._check_stop()
 
         if self.action.startswith("capture_"):
             stage = self.action[len("capture_"):]

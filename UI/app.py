@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from .image_preview import EvidencePreview
 from map_validator.app_logging import (
     AppLogFormatter,
     LOG_DIR,
@@ -400,6 +401,8 @@ class MainWindow(QMainWindow):
         self.individual_overlay_btn.setEnabled(False)
         self.individual_overlay_btn.clicked.connect(self._open_individual_overlay)
         individual_layout.addWidget(self.individual_overlay_btn)
+        self.individual_preview = EvidencePreview()
+        individual_layout.addWidget(self.individual_preview)
         self._individual_overlay_path = None
         self.individual_details = QTextEdit()
         self.individual_details.setReadOnly(True)
@@ -794,6 +797,7 @@ class MainWindow(QMainWindow):
             self.analysis_details.clear()
             self.individual_status.setText("개별 촬영 전 · 현재 위치 미확인")
             self.individual_details.clear()
+            self.individual_preview.clear_evidence()
             self._individual_overlay_path = None
             self.individual_overlay_btn.setEnabled(False)
             self.latest_folder = None
@@ -833,7 +837,7 @@ class MainWindow(QMainWindow):
                 raise ValueError(f"지원하지 않는 작업입니다: {action}")
             cfg = self._current_settings()
             case_id = self.case_input.text().strip()
-            if not case_id and not cfg["windows"].get(
+            if action != "capture_individual" and not case_id and not cfg["windows"].get(
                 "intersection_review_title", ""
             ).strip():
                 raise ValueError(
@@ -936,6 +940,11 @@ class MainWindow(QMainWindow):
             self.individual_overlay_btn.setEnabled(
                 self._individual_overlay_path.is_file()
             )
+            focus_path = (
+                Path(result["folder"])
+                / result.get("input_tool_focus", result["input_tool_overlay"])
+            )
+            self.individual_preview.set_evidence(focus_path)
             marker = result.get("red_marker", {})
             point = marker.get("point")
             stop = result.get("checks", {}).get("stop_line", {})
@@ -951,7 +960,11 @@ class MainWindow(QMainWindow):
                 f"정지선 후보 {len(candidates)}개 · 사람 검수 필요"
             )
             details = [
-                f"검수 ID: {result['case_id']}",
+                (
+                    "검수 ID: 미확인 · 별도 임시 촬영으로 저장됨"
+                    if result.get("unassigned")
+                    else f"검수 ID: {result['case_id']}"
+                ),
                 f"위치 검출 상태: {marker.get('status', 'unknown')}",
                 f"현재 위치: {point if point is not None else '판단 보류'} (이미지 픽셀)",
                 f"검은 도면 영역: {location.get('canvas_bounds', '미확인')}",
@@ -974,18 +987,29 @@ class MainWindow(QMainWindow):
             ]
             for i, candidate in enumerate(candidates, 1):
                 details.append(
-                    f"  {i}. 좌표 {candidate['endpoints']} "
-                    f"길이 {candidate['length_px']}px"
+                    f"  {candidate.get('candidate_id', f'S{i}')}. 좌표 "
+                    f"{candidate['endpoints']} 길이 {candidate['length_px']}px"
                 )
             details.extend([
                 "※ 선 후보는 정지선 확정이 아닙니다. 횡단보도/도로 경계를 구별하세요.",
                 f"원본: {result['input_tool_image']}",
                 f"근거: {result['input_tool_overlay']}",
+                f"후보 미리보기: {result.get('input_tool_focus', '없음')}",
                 f"보고서: individual_analysis.json",
             ])
             self.individual_details.setPlainText("\n".join(details))
             self.individual_details.verticalScrollBar().setValue(0)
-            self.status_label.setText("개별 촬영 분석 완료 · 최종 검수 필요")
+            self.status_label.setText(
+                "개별 촬영 저장 · 검수 ID 미확인 (최종 검수 필요)"
+                if result.get("unassigned")
+                else "개별 촬영 분석 완료 · 최종 검수 필요"
+            )
+            if result.get("unassigned"):
+                self._log(
+                    "검수 ID를 확인하지 못해 임시 촬영 폴더에 따로 저장했습니다. "
+                    "정식 검수 ID와 자동 연결하지 않습니다.",
+                    logging.WARNING,
+                )
             self._log(
                 f"개별 촬영 {result['revision']}회 · {marker_text} · "
                 f"시안색 선 후보 {len(candidates)}개"
