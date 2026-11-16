@@ -17,6 +17,8 @@ import cv2
 import numpy as np
 
 from .input_features import extract_input_features
+from .comparison.rules import compare_values
+from .intersection.roads import legacy_stage_road
 from .road_analysis import RoadSegmenter
 from .roadview_features import extract_roadview_features
 from .road_scores import (
@@ -51,51 +53,6 @@ def _write_image(path: Path, image: np.ndarray) -> None:
         raise RuntimeError(f"근거 이미지 생성 실패: {path}")
     encoded.tofile(str(path))
 
-
-def compare_values(expected: dict, observed: dict, field: str) -> dict:
-    lhs, rhs = expected.get("value"), observed.get("value")
-    if lhs is None or rhs is None:
-        status = "insufficient_evidence"
-        reason = "입력툴 기대값 또는 실제 로드뷰 관측값의 근거가 부족합니다."
-    elif lhs == rhs:
-        status = "match_candidate"
-        reason = "입력툴·로드뷰 후보 값이 같습니다. 실제 현장 검수가 필요합니다."
-    else:
-        status = "mismatch_review"
-        if field == "road_exists" and lhs is True and rhs is False:
-            reason = (
-                "입력툴에는 해당 방향의 도로가 있지만 로드뷰 전방 중앙에는 "
-                "건물 등 비도로 영역이 우세한 것으로 검출됐습니다. "
-                "실제 촬영 위치와 해당 방향을 확인하세요."
-            )
-        else:
-            reason = "입력툴 기대값과 로드뷰 관측값이 다릅니다. 사람 검수가 필요합니다."
-    if field == "stop_line":
-        verdict = (
-            "REVIEW" if lhs is None or rhs is None
-            else "PASS" if lhs == rhs else "FAIL"
-        )
-        if verdict == "PASS":
-            reason = "입력툴의 시안색 가로 정지선과 로드뷰의 실제 정지선 존재 여부가 같습니다."
-        elif verdict == "FAIL":
-            reason = "입력툴의 시안색 가로 정지선과 로드뷰의 실제 정지선 존재 여부가 다릅니다."
-        else:
-            reason = (
-                "정지선 유무를 확정할 수 없습니다. 횡단보도는 정지선으로 취급하지 "
-                "않으며, 검수자가 실제 로드뷰를 추가 확인해야 합니다."
-            )
-    else:
-        verdict = None
-    return {
-        "status": status,
-        "verdict": verdict,
-        "expected_value": lhs,
-        "observed_value": rhs,
-        "field": field, "label": FIELD_LABELS[field],
-        "reason": reason,
-        "expected_confidence": expected.get("confidence"),
-        "observed_confidence": observed.get("confidence"),
-    }
 
 
 def _atomic_report(path: Path, report: dict) -> None:
@@ -142,6 +99,7 @@ def analyze_stages(
         "source": "four_stage_saved_wgc_images",
         "human_review": "requires_human_review",
         "stages": {},
+        "roads": [],  # Additive road-ID records; original stages remain compatible.
     }
     mismatch_count = 0
     assessed = 0
@@ -166,6 +124,11 @@ def analyze_stages(
                 "reason": "입력툴·로드뷰 사진 쌍이 아직 완성되지 않았습니다.",
                 "comparison": {},
             }
+            report["roads"].append({
+                **legacy_stage_road(stage),
+                "capture_state": state,
+                "analysis_state": "not_analyzed",
+            })
             continue
 
         progress(f"{STAGE_LABELS[stage]}: 입력툴 기대값 및 로드뷰 도로·건물 분석")
@@ -277,6 +240,7 @@ def analyze_stages(
             "capture_state": "captured", "analysis_state": stage_result,
             "revision": revision,
             "input_expected": input_expected,
+            "input_tool_expected": input_expected,  # New explicit name; old alias preserved.
             "roadview_observed": roadview_observed,
             "comparison": compare,
             "stop_line_verdict": (
@@ -299,6 +263,16 @@ def analyze_stages(
             },
             "human_review": "requires_human_review",
         }
+        report["roads"].append({
+            **legacy_stage_road(stage),
+            "capture_state": "captured",
+            "analysis_state": stage_result,
+            "capture_revision": revision,
+            "input_tool": input_expected,
+            "roadview": roadview_observed,
+            "comparison": compare,
+            "evidence": report["stages"][stage]["evidence"],
+        })
 
     check_stop()
     overall = (
@@ -349,4 +323,5 @@ def analyze_stages(
         "kind": "staged_analysis", "folder": str(folder), "case_id": case_id,
         "stages": report["stages"], "summary": report["summary"],
         "road_scores": scores, "score_files": score_files,
+        "roads": report["roads"],
     }
