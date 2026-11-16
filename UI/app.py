@@ -955,9 +955,14 @@ class MainWindow(QMainWindow):
                 if point is not None else "현재 위치 미확인"
             )
             candidates = stop.get("line_candidates", [])
+            omitted = int(stop.get("omitted_segments", 0) or 0)
+            candidate_label = (
+                f"선 후보 {len(candidates)}개 표시 / 총 {len(candidates) + omitted}개"
+                if omitted else f"선 후보 {len(candidates)}개"
+            )
             self.individual_status.setText(
                 f"개별 촬영 {result['revision']}회 · {marker_text} · "
-                f"정지선 후보 {len(candidates)}개 · 사람 검수 필요"
+                f"{candidate_label} · 사람 검수 필요"
             )
             details = [
                 (
@@ -983,8 +988,10 @@ class MainWindow(QMainWindow):
                 f"도면 중앙 근접 원본 객체(최대 8개): {diagnostics.get('raw_nearest_components', [])}",
                 f"정지선: {stop.get('reason', '판단 보류')}",
                 f"근거 ROI: {stop.get('roi', '위치 미확인')}",
-                f"시안색 선 후보: {len(candidates)}개",
+                f"시안색 선 후보: {candidate_label} (실제 정지선 개수 아님)",
             ]
+            if omitted:
+                details.append(f"※ 선 조각 {omitted}개는 표시 상한(24개) 때문에 생략됨")
             for i, candidate in enumerate(candidates, 1):
                 details.append(
                     f"  {candidate.get('candidate_id', f'S{i}')}. 좌표 "
