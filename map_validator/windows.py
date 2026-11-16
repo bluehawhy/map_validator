@@ -241,15 +241,19 @@ def _intersection_number(value: str, kind: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _read_uia_intersection(window) -> str | None:
+def _read_uia_intersection(window, diagnostic=None) -> str | None:
     """Read an accessible selected TreeItem without changing selection."""
     try:
         tree_items = [
             control for control in window.descendants()
             if control.element_info.control_type == "TreeItem"
         ]
-    except Exception:
+    except Exception as exc:
+        if diagnostic is not None:
+            diagnostic(f"UIA TreeItem 열거 예외: {type(exc).__name__}: {exc}")
         return None
+    if diagnostic is not None:
+        diagnostic(f"UIA TreeItem 총 {len(tree_items)}개")
 
     def selected(control) -> bool:
         try:
@@ -266,6 +270,8 @@ def _read_uia_intersection(window) -> str | None:
             return False
 
     selected_items = [item for item in tree_items if selected(item)]
+    if diagnostic is not None:
+        diagnostic(f"UIA 선택 상태 표시된 TreeItem {len(selected_items)}개")
     selected_polygon = next(
         (
             _intersection_number(item.window_text(), "Polygon")
@@ -280,6 +286,8 @@ def _read_uia_intersection(window) -> str | None:
         None,
     )
     if selected_link is None:
+        if not selected_polygon and diagnostic is not None:
+            diagnostic("UIA 선택된 Polygon/Link 없음 (선택 상태 또는 TreeItem 이름 확인)")
         return f"Polygon {selected_polygon}" if selected_polygon else None
 
     link_id = _intersection_number(selected_link.window_text(), "Link")
@@ -304,24 +312,34 @@ def _read_uia_intersection(window) -> str | None:
                     break
         except ValueError:
             pass
+    if not polygon_id and diagnostic is not None:
+        diagnostic("UIA Link 선택은 감지했으나 부모 Polygon을 확인하지 못함")
     return f"Polygon {polygon_id}- Link {link_id}" if polygon_id else None
 
 
-def _read_win32_intersection(handle: int) -> str | None:
+def _read_win32_intersection(handle: int, diagnostic=None) -> str | None:
     """Fallback for native Win32 TreeView controls inside #32770 dialogs."""
     from pywinauto import Desktop
 
     try:
         window = Desktop(backend="win32").window(handle=handle).wrapper_object()
         controls = [window, *window.descendants()]
-    except Exception:
+    except Exception as exc:
+        if diagnostic is not None:
+            diagnostic(f"Win32 창/컨트롤 열거 예외: {type(exc).__name__}: {exc}")
         return None
 
+    tree_count = 0
+    inspected_count = 0
+    selected_count = 0
     for tree in controls:
         try:
             if tree.class_name().casefold() != "systreeview32":
                 continue
             roots = tree.roots()
+            tree_count += 1
+            if diagnostic is not None:
+                diagnostic(f"Win32 SysTreeView32 root={len(roots)}")
         except Exception:
             continue
 
@@ -333,12 +351,15 @@ def _read_win32_intersection(handle: int) -> str | None:
         while stack and inspected < 3000:
             item, parent_polygon = stack.pop()
             inspected += 1
+            inspected_count += 1
             try:
                 label = item.text()
                 polygon_id = _intersection_number(label, "Polygon")
                 link_id = _intersection_number(label, "Link")
                 selected = item.is_selected()
                 children = item.children()
+                if selected:
+                    selected_count += 1
             except Exception:
                 continue
 
@@ -354,6 +375,11 @@ def _read_win32_intersection(handle: int) -> str | None:
                 return f"Polygon {polygon_id}"
             child_owner = polygon_id or parent_polygon
             stack.extend((child, child_owner) for child in reversed(children))
+    if diagnostic is not None:
+        diagnostic(
+            f"Win32 선택 없음: SysTreeView32={tree_count}, "
+            f"방문노드={inspected_count}, 선택노드={selected_count}"
+        )
     return None
 
 
@@ -400,11 +426,13 @@ def read_selected_intersection_id(title_keyword: str, diagnostic=None) -> str:
         if handle and handle not in handles:
             handles.append(handle)
 
+    if diagnostic is not None:
+        diagnostic(f"Win32 일치창={len(win32_matches)}, 유효HWND={len(handles)}")
     if handles:
         # Native SysTreeView32 lookup is significantly cheaper than a full
         # UI Automation descendants() scan and never changes window focus.
         for handle in handles:
-            result = timed("Win32 트리 선택 조회", lambda: _read_win32_intersection(handle))
+            result = timed("Win32 트리 선택 조회", lambda: _read_win32_intersection(handle, diagnostic))
             if result:
                 return result
 
@@ -413,7 +441,7 @@ def read_selected_intersection_id(title_keyword: str, diagnostic=None) -> str:
         for handle in handles:
             try:
                 wrapper = timed("UIA 창 연결", lambda: Desktop(backend="uia").window(handle=handle).wrapper_object())
-                result = timed("UIA 트리 선택 조회", lambda: _read_uia_intersection(wrapper))
+                result = timed("UIA 트리 선택 조회", lambda: _read_uia_intersection(wrapper, diagnostic))
                 if result:
                     return result
             except Exception:
@@ -435,13 +463,13 @@ def read_selected_intersection_id(title_keyword: str, diagnostic=None) -> str:
             )
 
         for window in uia_matches:
-            result = timed("UIA 트리 선택 조회", lambda: _read_uia_intersection(window))
+            result = timed("UIA 트리 선택 조회", lambda: _read_uia_intersection(window, diagnostic))
             if result:
                 return result
             try:
                 handle = int(window.handle)
                 if handle:
-                    result = timed("Win32 트리 선택 조회", lambda: _read_win32_intersection(handle))
+                    result = timed("Win32 트리 선택 조회", lambda: _read_win32_intersection(handle, diagnostic))
                     if result:
                         return result
             except Exception:
