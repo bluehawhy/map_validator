@@ -378,8 +378,8 @@ class MainWindow(QMainWindow):
         individual_layout.setContentsMargins(9, 8, 9, 8)
         individual_layout.setSpacing(6)
         individual_note = self._label(
-            "현재 input_tool 화면만 WGC 촬영합니다. 빨간 점을 위치 기준으로 "
-            "정지선 후보를 찾으며, 기준점이 불명확하면 판단 보류합니다.",
+            "현재 input_tool 화면을 WGC 촬영하고 도면 중앙의 작은 빨간 사각 표시를 "
+            "현재 위치 후보로 찾습니다. 주변 정지선 후보는 별도 확인합니다.",
             "hint",
         )
         individual_note.setWordWrap(True)
@@ -393,7 +393,7 @@ class MainWindow(QMainWindow):
             lambda: self._start("capture_individual")
         )
         individual_layout.addWidget(self.individual_capture_btn)
-        self.individual_status = self._label("개별 촬영 전 · 빨간 점 기준점 미확인", "hint")
+        self.individual_status = self._label("개별 촬영 전 · 현재 위치 미확인", "hint")
         self.individual_status.setWordWrap(True)
         individual_layout.addWidget(self.individual_status)
         self.individual_overlay_btn = QPushButton("빨간 점 · 근거 이미지 보기")
@@ -404,7 +404,7 @@ class MainWindow(QMainWindow):
         self.individual_details = QTextEdit()
         self.individual_details.setReadOnly(True)
         self.individual_details.setPlaceholderText(
-            "개별 촬영 후 빨간 점 위치와 정지선 후보 좌표·근거 이미지 경로를 표시합니다."
+            "개별 촬영 후 현재 위치의 픽셀 좌표, 도면 중심과의 거리, 정지선 후보를 표시합니다."
         )
         individual_layout.addWidget(self.individual_details, 1)
         self.capture_tabs.addTab(individual_page, "개별 촬영 분석")
@@ -792,7 +792,7 @@ class MainWindow(QMainWindow):
             self._displayed_case_id = current_id
             self.geometry_result.setText("검수 ID 변경 · 촬영본 분석 전")
             self.analysis_details.clear()
-            self.individual_status.setText("개별 촬영 전 · 빨간 점 기준점 미확인")
+            self.individual_status.setText("개별 촬영 전 · 현재 위치 미확인")
             self.individual_details.clear()
             self._individual_overlay_path = None
             self.individual_overlay_btn.setEnabled(False)
@@ -939,9 +939,10 @@ class MainWindow(QMainWindow):
             marker = result.get("red_marker", {})
             point = marker.get("point")
             stop = result.get("checks", {}).get("stop_line", {})
+            location = result.get("location", {})
             marker_text = (
-                f"빨간 점 후보: ({point[0]:.1f}, {point[1]:.1f})"
-                if point is not None else "빨간 점 미확인"
+                f"현재 위치 후보: ({point[0]:.1f}, {point[1]:.1f})px"
+                if point is not None else "현재 위치 미확인"
             )
             candidates = stop.get("line_candidates", [])
             self.individual_status.setText(
@@ -950,8 +951,14 @@ class MainWindow(QMainWindow):
             )
             details = [
                 f"검수 ID: {result['case_id']}",
-                f"빨간 점: {marker.get('status', 'unknown')} · {marker.get('reason', '')}",
-                f"위치 좌표: {point if point is not None else '판단 보류'}",
+                f"위치 검출 상태: {marker.get('status', 'unknown')}",
+                f"현재 위치: {point if point is not None else '판단 보류'} (이미지 픽셀)",
+                f"검은 도면 영역: {location.get('canvas_bounds', '미확인')}",
+                f"도면 중심: {location.get('canvas_center', '미확인')}",
+                f"도면 중심 대비 이동량(px): {location.get('center_offset_px', '미확인')}",
+                f"도면 내부 상대 위치: {location.get('canvas_normalized_point', '미확인')}",
+                "실제 지도 좌표 / 현재 도로 / 진행 방향: 미확인",
+                f"검출 근거: {marker.get('reason', '')}",
                 f"정지선: {stop.get('reason', '판단 보류')}",
                 f"근거 ROI: {stop.get('roi', '위치 미확인')}",
                 f"시안색 선 후보: {len(candidates)}개",
