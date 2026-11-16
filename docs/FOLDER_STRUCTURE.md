@@ -123,3 +123,25 @@ UI/worker.py                        # 기존 4단계와 개별 WGC 작업
 기존 `input_features.py` / `roadview_features.py`는 호환 진입점으로 유지하며, 이전 `stop_line.py` 등에는 기존 검출 코드가 남아있다. 더 이상 호출되지 않는 레거시를 **참조 검증 없이 삭제하지 않는다**.
 
 자세한 데이터 구분은 [FEATURE_ANALYSIS_REFACTOR.md](FEATURE_ANALYSIS_REFACTOR.md).
+
+## 개별 촬영 증거 확장 (2026-11-16)
+
+```text
+output.directory/
+├── <검수 ID>/
+│   └── captures/individual/
+│       ├── input_tool_r001.png
+│       ├── input_tool_r001_overlay.png    # S1…SN 번호·선·끝점
+│       └── input_tool_r001_focus.png      # 탭 내 확대 미리보기
+└── _unassigned_individual/               # 검수 ID가 없는 개별 촬영만
+    └── Unassigned_<UTC>_<unique>/
+        ├── individual_capture.json
+        ├── individual_analysis.json
+        ├── individual_analysis_r001.json
+        └── captures/individual/
+            ├── input_tool_r001.png
+            ├── input_tool_r001_overlay.png
+            └── input_tool_r001_focus.png
+```
+
+`UI/image_preview.py`는 PyQt6 확대 근거 미리보기를 전담한다. 개별 임시 촬영 기록은 단계별 스테이지 원본이나 정식 검수 ID 폴더를 변경하지 않는다.
