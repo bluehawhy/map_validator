@@ -148,4 +148,4 @@ output.directory/
 
 ## 선 그룹 공통 모듈 (2026-11-16)
 
-`map_validator/analysis/line_grouping.py`는 개별 정지선 후보를 비롯하여 향후 차선·중앙선·유도선에 재사용할 **선 조각 기하 그룹화**를 담당한다. 특징별 판단/검출 코드는 기존 `analysis/input_tool/`, `analysis/roadview/` 아래 유지하고, 공통 그룹화 파일 안에서는 어떤 표시가 정지선·차선·중앙선인지 판별하지 않는다.
+`map_validator/analysis/line_grouping.py`는 개별 정지선 후보를 비롯하여 향후 차선·중앙선·유도선에 재사용할 **선 조각 기하 그룹화**를 담당한다. 현재 정지선 후보와 노란 중앙선 후보에 재사용하며, 특징별 검출은 `analysis/input_tool/local_stop_line.py`와 `analysis/input_tool/local_center_line.py`로 분리한다. 기존 원본 PNG 파일 구조는 유지하며 C 포인트 및 중앙선 그룹은 `individual_analysis*.json`의 `checks.center_line`에 추가한다.

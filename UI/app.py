@@ -380,12 +380,12 @@ class MainWindow(QMainWindow):
         individual_layout.setSpacing(6)
         individual_note = self._label(
             "현재 input_tool 화면을 WGC 촬영하고 도면 중앙의 작은 빨간 사각 표시를 "
-            "현재 위치 후보로 찾습니다. 주변 정지선 후보는 별도 확인합니다.",
+            "현재 위치 후보로 찾습니다. 주변 시안색 정지선·노란 중앙선 후보를 함께 표시합니다.",
             "hint",
         )
         individual_note.setWordWrap(True)
         individual_layout.addWidget(individual_note)
-        self.individual_capture_btn = QPushButton("개별 촬영 · 정지선 분석")
+        self.individual_capture_btn = QPushButton("개별 촬영 · 정지선/중앙선 분석")
         self.individual_capture_btn.setObjectName("primary")
         self.individual_capture_btn.setToolTip(
             "기존 단계별 촬영을 변경하지 않고 현재 input_tool 화면을 별도로 저장합니다."
@@ -948,6 +948,8 @@ class MainWindow(QMainWindow):
             marker = result.get("red_marker", {})
             point = marker.get("point")
             stop = result.get("checks", {}).get("stop_line", {})
+            center_line = result.get("checks", {}).get("center_line", {})
+            center_points = center_line.get("line_groups", [])
             diagnostics = marker.get("diagnostics", {})
             location = result.get("location", {})
             marker_text = (
@@ -968,7 +970,8 @@ class MainWindow(QMainWindow):
             )
             self.individual_status.setText(
                 f"개별 촬영 {result['revision']}회 · {marker_text} · "
-                f"{grouping_label} · 사람 검수 필요"
+                f"{grouping_label} · 중앙선 포인트 {len(center_points)}개 "
+                f"(표시 후보) · 사람 검수 필요"
             )
             details = [
                 (
@@ -1015,8 +1018,29 @@ class MainWindow(QMainWindow):
                     f"{candidate['endpoints']} 길이 {candidate['length_px']}px "
                     f"그룹 {candidate.get('group_id', '미할당')}"
                 )
+            details.append("── 노란 중앙선 포인트 후보 (C) ──")
+            details.append(
+                f"중앙선: {center_line.get('reason', '판단 보류')}"
+            )
+            details.append(
+                f"노란 선 조각 {center_line.get('shown_segments', 0)}/"
+                f"{center_line.get('total_segments', 0)}개, "
+                f"포인트 {center_line.get('shown_points', 0)}/"
+                f"{center_line.get('group_count', 0)}개 표시 (확정 개수 아님)"
+            )
+            for group in center_points:
+                details.append(
+                    f"  {group['group_id']}: 포인트 {group['point']}px · "
+                    f"방향 {group['orientation']} ({group['angle_deg']:.1f}°) · "
+                    f"길이 {group['length_px']:.1f}px · 조각 {', '.join(group['member_ids'])}"
+                )
+            if center_line.get('omitted_points', 0):
+                details.append(
+                    f"※ 중앙선 포인트 {center_line['omitted_points']}개는 표시 상한으로 생략됨"
+                )
             details.extend([
                 "※ 선 후보는 정지선 확정이 아닙니다. 횡단보도/도로 경계를 구별하세요.",
+                "※ 노란 선/포인트는 중앙선 검수용 후보이며 실제 중앙선 2개·4개를 확정하지 않습니다.",
                 f"원본: {result['input_tool_image']}",
                 f"근거: {result['input_tool_overlay']}",
                 f"후보 미리보기: {result.get('input_tool_focus', '없음')}",
