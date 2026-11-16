@@ -19,17 +19,30 @@ def local_stop_line_candidates(
 
     height, width = image.shape[:2]
     cx, cy = point
-    radius_x = max(55, int(width * .18))
-    radius_y = max(55, int(height * .19))
-    x0, y0 = max(0, round(cx) - radius_x), max(0, round(cy) - radius_y)
-    x1, y1 = min(width, round(cx) + radius_x), min(height, round(cy) + radius_y)
+    # Wide, asymmetric map viewport selection: approximate the inspector's
+    # marked region around the current-position marker. More road is visible
+    # below/above the marker than in the earlier small symmetric box.
+    radius_x = max(55, round(width * .31))
+    radius_above = max(55, round(height * .35))
+    radius_below = max(55, round(height * .44))
+    # Ignore the HD_3D Tool toolbar (top) and status strip (bottom).
+    map_top = round(height * .14)
+    map_bottom = min(height, round(height * .976))
+    x0 = max(0, round(cx) - radius_x)
+    x1 = min(width, round(cx) + radius_x)
+    y0 = max(map_top, round(cy) - radius_above)
+    y1 = min(map_bottom, round(cy) + radius_below)
+    if x1 <= x0 or y1 <= y0:
+        return unknown("현재 위치의 확장 도면 분석 범위가 유효하지 않습니다.")
     roi = image[y0:y1, x0:x1]
-    cv2.rectangle(overlay, (x0, y0), (x1 - 1, y1 - 1), (255, 180, 0), 1)
+    cv2.rectangle(overlay, (x0, y0), (x1 - 1, y1 - 1), (0, 145, 255), 2)
 
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     cyan = cv2.inRange(hsv, (78, 105, 120), (102, 255, 255))
     cyan = cv2.morphologyEx(cyan, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
-    minimum = max(14, round(min(roi.shape[:2]) * .11))
+    # Keep the old per-image line sensitivity. Scaling the minimum line
+    # length with the wider ROI would silently discard shorter stop lines.
+    minimum = max(14, round(min(height, width) * .042))
     hough = cv2.HoughLinesP(
         cyan, 1, np.pi / 180, threshold=max(9, minimum // 2),
         minLineLength=minimum, maxLineGap=5,
@@ -44,7 +57,8 @@ def local_stop_line_candidates(
                          [int(x_b + x0), int(y_b + y0)]]
             lines.append({"endpoints": endpoints, "length_px": round(distance, 1)})
     lines.sort(key=lambda line: line["length_px"], reverse=True)
-    lines = lines[:12]
+    total_segments = len(lines)
+    lines = lines[:24]
     # Show the evidence for every detected Hough segment, not just a count.
     # S1..SN match the serialized list and the UI's details panel.
     occupied_labels: list[tuple[int, int, int, int]] = []
@@ -79,9 +93,12 @@ def local_stop_line_candidates(
     return {
         "value": None,
         "confidence": None,
-        "method": "red_marker_local_cyan_lines_v1",
+        "method": "red_marker_local_cyan_lines_v2_wide_roi",
         "reason": ("빨간 기준점 주변의 시안색 선 후보입니다. 정지선/도로 경계의 구별은 수동 검증이 필요합니다."
                    if lines else "빨간 기준점 주변에서 시안색 선 후보를 찾지 못했습니다. 정지선 없음으로 확정하지 않습니다."),
         "roi": [x0, y0, x1, y1],
+        "total_segments": total_segments,
+        "shown_segments": len(lines),
+        "omitted_segments": max(0, total_segments - len(lines)),
         "line_candidates": lines,
     }
