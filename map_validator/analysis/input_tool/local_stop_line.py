@@ -115,13 +115,22 @@ def local_stop_line_candidates(
         font = cv2.FONT_HERSHEY_SIMPLEX
         scale, thickness = .7, 2
         (tw, th), baseline = cv2.getTextSize(label, font, scale, thickness)
-        # Offset the group label away from the line and pre-existing S# tags.
-        y = max(th + 6, min(center_y - 24, height - baseline - 5))
-        x = max(2, min(center_x + 12, width - tw - 6))
-        cv2.rectangle(overlay, (x - 4, y - th - 4),
-                      (x + tw + 4, y + baseline + 4), (20, 20, 20), -1)
-        cv2.rectangle(overlay, (x - 4, y - th - 4),
-                      (x + tw + 4, y + baseline + 4), (30, 255, 120), 1)
+        # Keep G# labels clear of the S# labels already placed on the image.
+        for dx, dy in ((12, -28), (-tw - 12, -28), (12, 40),
+                       (-tw - 12, 40), (20, -55), (-tw - 20, 65)):
+            x = max(4, min(center_x + dx, width - tw - 6))
+            y = max(th + 6, min(center_y + dy, height - baseline - 5))
+            box = (x - 4, y - th - 4, x + tw + 4, y + baseline + 4)
+            if not any(not (
+                box[2] < prev[0] or box[0] > prev[2]
+                or box[3] < prev[1] or box[1] > prev[3]
+            ) for prev in occupied_labels):
+                break
+        occupied_labels.append(box)
+        cv2.rectangle(overlay, (box[0], box[1]),
+                      (box[2], box[3]), (20, 20, 20), -1)
+        cv2.rectangle(overlay, (box[0], box[1]),
+                      (box[2], box[3]), (30, 255, 120), 1)
         cv2.putText(overlay, label, (x, y), font, scale,
                     (30, 255, 120), thickness, cv2.LINE_AA)
 
