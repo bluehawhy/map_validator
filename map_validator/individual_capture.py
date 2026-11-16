@@ -52,6 +52,7 @@ def capture_and_analyze(
 
     raw_path = target_dir / f"input_tool_r{revision:03d}.png"
     overlay_path = target_dir / f"input_tool_r{revision:03d}_overlay.png"
+    focus_path = target_dir / f"input_tool_r{revision:03d}_focus.png"
     ok, encoded_frame = cv2.imencode(".png", input_tool_image)
     if not ok:
         raise RuntimeError("촬영 이미지 PNG 인코딩에 실패했습니다.")
@@ -111,12 +112,37 @@ def capture_and_analyze(
     finally:
         overlay_temp.unlink(missing_ok=True)
 
+    # A magnified ROI preview lets the inspector identify S1..SN in the UI,
+    # while the original and full-size overlay remain immutable.
+    roi = stop_line.get("roi")
+    if roi and len(roi) == 4:
+        left, top, right, bottom = [int(value) for value in roi]
+        padding = 20
+        left = max(0, left - padding)
+        top = max(0, top - padding)
+        right = min(overlay.shape[1], right + padding)
+        bottom = min(overlay.shape[0], bottom + padding)
+        focus = overlay[top:bottom, left:right]
+    else:
+        focus = overlay
+    ok, encoded_focus = cv2.imencode(".png", focus)
+    if not ok:
+        raise RuntimeError("정지선 후보 미리보기 PNG 인코딩에 실패했습니다.")
+    focus_temp = focus_path.with_suffix(".png.tmp")
+    try:
+        with focus_temp.open("xb") as stream:
+            stream.write(encoded_focus.tobytes())
+        os.replace(focus_temp, focus_path)
+    finally:
+        focus_temp.unlink(missing_ok=True)
+
     now = datetime.now(timezone.utc).isoformat()
     record = {
         "schema_version": 1, "case_id": case_id, "revision": revision,
         "captured_at_utc": now, "source": "input_tool_manual_wgc",
         "input_tool_image": raw_path.relative_to(folder).as_posix(),
         "input_tool_overlay": overlay_path.relative_to(folder).as_posix(),
+        "input_tool_focus": focus_path.relative_to(folder).as_posix(),
         "red_marker": marker,
         "location": {
             "reference": "input_tool_current_position_red_marker",
@@ -164,9 +190,9 @@ def capture_and_analyze(
     _write_json(manifest_path, manifest)
     APP_LOG.info(
         "[개별촬영][위치진단] 완료 촬영버전=%d 원본=%s 근거오버레이=%s "
-        "보고서=%s 상태=%s",
+        "보고서=%s 상태=%s 후보이미지=%s",
         revision, raw_path.name, overlay_path.name, history_path.name,
-        marker["status"],
+        marker["status"], focus_path.name,
     )
     return {
         "kind": "individual_analysis", "folder": str(folder), "case_id": case_id,
