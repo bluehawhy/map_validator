@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from ..findings import unknown
+from ..line_grouping import group_line_segments
 
 
 def local_stop_line_candidates(
@@ -19,17 +20,30 @@ def local_stop_line_candidates(
 
     height, width = image.shape[:2]
     cx, cy = point
-    radius_x = max(55, int(width * .18))
-    radius_y = max(55, int(height * .19))
-    x0, y0 = max(0, round(cx) - radius_x), max(0, round(cy) - radius_y)
-    x1, y1 = min(width, round(cx) + radius_x), min(height, round(cy) + radius_y)
+    # Wide, asymmetric map viewport selection: approximate the inspector's
+    # marked region around the current-position marker. More road is visible
+    # below/above the marker than in the earlier small symmetric box.
+    radius_x = max(55, round(width * .31))
+    radius_above = max(55, round(height * .35))
+    radius_below = max(55, round(height * .44))
+    # Ignore the HD_3D Tool toolbar (top) and status strip (bottom).
+    map_top = round(height * .14)
+    map_bottom = min(height, round(height * .976))
+    x0 = max(0, round(cx) - radius_x)
+    x1 = min(width, round(cx) + radius_x)
+    y0 = max(map_top, round(cy) - radius_above)
+    y1 = min(map_bottom, round(cy) + radius_below)
+    if x1 <= x0 or y1 <= y0:
+        return unknown("현재 위치의 확장 도면 분석 범위가 유효하지 않습니다.")
     roi = image[y0:y1, x0:x1]
-    cv2.rectangle(overlay, (x0, y0), (x1 - 1, y1 - 1), (255, 180, 0), 1)
+    cv2.rectangle(overlay, (x0, y0), (x1 - 1, y1 - 1), (0, 145, 255), 2)
 
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     cyan = cv2.inRange(hsv, (78, 105, 120), (102, 255, 255))
     cyan = cv2.morphologyEx(cyan, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
-    minimum = max(14, round(min(roi.shape[:2]) * .11))
+    # Keep the old per-image line sensitivity. Scaling the minimum line
+    # length with the wider ROI would silently discard shorter stop lines.
+    minimum = max(14, round(min(height, width) * .042))
     hough = cv2.HoughLinesP(
         cyan, 1, np.pi / 180, threshold=max(9, minimum // 2),
         minLineLength=minimum, maxLineGap=5,
@@ -44,12 +58,24 @@ def local_stop_line_candidates(
                          [int(x_b + x0), int(y_b + y0)]]
             lines.append({"endpoints": endpoints, "length_px": round(distance, 1)})
     lines.sort(key=lambda line: line["length_px"], reverse=True)
-    lines = lines[:12]
+    total_segments = len(lines)
+    lines = lines[:24]
+    # The geometry grouping is shared with future lane/centre-line detectors.
+    # S# denotes raw Hough fragments; G# denotes geometrically aligned groups.
+    for index, line in enumerate(lines, 1):
+        line["candidate_id"] = f"S{index}"
+    groups = group_line_segments(lines)
+    member_groups = {
+        member_id: group["group_id"]
+        for group in groups for member_id in group["member_ids"]
+    }
+    for line in lines:
+        line["group_id"] = member_groups[line["candidate_id"]]
+
     # Show the evidence for every detected Hough segment, not just a count.
     # S1..SN match the serialized list and the UI's details panel.
     occupied_labels: list[tuple[int, int, int, int]] = []
     for index, line in enumerate(lines, start=1):
-        line["candidate_id"] = f"S{index}"
         a, b = line["endpoints"]
         cv2.line(overlay, tuple(a), tuple(b), (0, 255, 255), 3, cv2.LINE_AA)
         for endpoint in (a, b):
@@ -76,12 +102,56 @@ def local_stop_line_candidates(
         cv2.putText(overlay, label, (tx, ty), font, scale, (255, 255, 255),
                     thickness, cv2.LINE_AA)
 
+    # Draw each fitted group line in magenta, with a separate green G# tag.
+    # The S# labels remain visible for inspecting merges / false positives.
+    for group in groups:
+        first, last = group["endpoints"]
+        a = tuple(round(value) for value in first)
+        b = tuple(round(value) for value in last)
+        cv2.line(overlay, a, b, (230, 80, 230), 2, cv2.LINE_AA)
+        center_x = round((a[0] + b[0]) / 2)
+        center_y = round((a[1] + b[1]) / 2)
+        label = group["group_id"]
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale, thickness = .7, 2
+        (tw, th), baseline = cv2.getTextSize(label, font, scale, thickness)
+        # Keep G# labels clear of the S# labels already placed on the image.
+        for dx, dy in ((12, -28), (-tw - 12, -28), (12, 40),
+                       (-tw - 12, 40), (20, -55), (-tw - 20, 65)):
+            x = max(4, min(center_x + dx, width - tw - 6))
+            y = max(th + 6, min(center_y + dy, height - baseline - 5))
+            box = (x - 4, y - th - 4, x + tw + 4, y + baseline + 4)
+            if not any(not (
+                box[2] < prev[0] or box[0] > prev[2]
+                or box[3] < prev[1] or box[1] > prev[3]
+            ) for prev in occupied_labels):
+                break
+        occupied_labels.append(box)
+        cv2.rectangle(overlay, (box[0], box[1]),
+                      (box[2], box[3]), (20, 20, 20), -1)
+        cv2.rectangle(overlay, (box[0], box[1]),
+                      (box[2], box[3]), (30, 255, 120), 1)
+        cv2.putText(overlay, label, (x, y), font, scale,
+                    (30, 255, 120), thickness, cv2.LINE_AA)
+
     return {
         "value": None,
         "confidence": None,
-        "method": "red_marker_local_cyan_lines_v1",
+        "method": "red_marker_local_cyan_lines_v3_grouped_wide_roi",
         "reason": ("빨간 기준점 주변의 시안색 선 후보입니다. 정지선/도로 경계의 구별은 수동 검증이 필요합니다."
                    if lines else "빨간 기준점 주변에서 시안색 선 후보를 찾지 못했습니다. 정지선 없음으로 확정하지 않습니다."),
         "roi": [x0, y0, x1, y1],
+        "total_segments": total_segments,
+        "shown_segments": len(lines),
+        "omitted_segments": max(0, total_segments - len(lines)),
         "line_candidates": lines,
+        "line_groups": groups,
+        "group_count": len(groups),
+        "grouping_complete": total_segments == len(lines),
+        "grouping_rules": {
+            "angle_tolerance_deg": 8.0,
+            "perpendicular_tolerance_px": 6.0,
+            "max_axial_gap_px": 12.0,
+            "requires_overlap_or_short_gap": True,
+        },
     }

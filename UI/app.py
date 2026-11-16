@@ -955,9 +955,20 @@ class MainWindow(QMainWindow):
                 if point is not None else "현재 위치 미확인"
             )
             candidates = stop.get("line_candidates", [])
+            groups = stop.get("line_groups", [])
+            omitted = int(stop.get("omitted_segments", 0) or 0)
+            candidate_label = (
+                f"선 후보 {len(candidates)}개 표시 / 총 {len(candidates) + omitted}개"
+                if omitted else f"선 후보 {len(candidates)}개"
+            )
+            grouping_label = (
+                f"선 그룹 후보 {len(groups)}개 / {candidate_label}"
+                if stop.get("grouping_complete", True)
+                else f"표시된 선 그룹 {len(groups)}개 / {candidate_label} (일부만 그룹화)"
+            )
             self.individual_status.setText(
                 f"개별 촬영 {result['revision']}회 · {marker_text} · "
-                f"정지선 후보 {len(candidates)}개 · 사람 검수 필요"
+                f"{grouping_label} · 사람 검수 필요"
             )
             details = [
                 (
@@ -983,12 +994,26 @@ class MainWindow(QMainWindow):
                 f"도면 중앙 근접 원본 객체(최대 8개): {diagnostics.get('raw_nearest_components', [])}",
                 f"정지선: {stop.get('reason', '판단 보류')}",
                 f"근거 ROI: {stop.get('roi', '위치 미확인')}",
-                f"시안색 선 후보: {len(candidates)}개",
+                f"시안색 선 후보: {candidate_label} (실제 정지선 개수 아님)",
+                f"기하학적 선 그룹: {len(groups)}개 (정지선 수 확정 아님)",
+                f"그룹화 기준: {stop.get('grouping_rules', '미확인')}",
+                "── 선 그룹 (G) · 구성 선 조각 (S) ──",
             ]
+            for group in groups:
+                details.append(
+                    f"  {group['group_id']}: {', '.join(group['member_ids'])} "
+                    f"· {group['member_count']}조각 "
+                    f"· 방향 {group['angle_deg']:.1f}° ({group['orientation']}) "
+                    f"· 길이 {group['length_px']:.1f}px "
+                    f"· 통합 좌표 {group['endpoints']}"
+                )
+            if omitted:
+                details.append(f"※ 선 조각 {omitted}개는 표시 상한(24개) 때문에 생략됨")
             for i, candidate in enumerate(candidates, 1):
                 details.append(
                     f"  {candidate.get('candidate_id', f'S{i}')}. 좌표 "
-                    f"{candidate['endpoints']} 길이 {candidate['length_px']}px"
+                    f"{candidate['endpoints']} 길이 {candidate['length_px']}px "
+                    f"그룹 {candidate.get('group_id', '미할당')}"
                 )
             details.extend([
                 "※ 선 후보는 정지선 확정이 아닙니다. 횡단보도/도로 경계를 구별하세요.",
@@ -1012,7 +1037,7 @@ class MainWindow(QMainWindow):
                 )
             self._log(
                 f"개별 촬영 {result['revision']}회 · {marker_text} · "
-                f"시안색 선 후보 {len(candidates)}개"
+                f"선 그룹 {len(groups)}개 / 시안색 선 조각 {len(candidates)}개"
             )
         elif kind == "staged_analysis":
             from map_validator.stage_types import STAGES, STAGE_LABELS, FIELD_LABELS
