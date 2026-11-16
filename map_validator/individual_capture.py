@@ -65,8 +65,20 @@ def capture_and_analyze(
     marker = find_red_marker(input_tool_image)
     overlay = input_tool_image.copy()
     point = marker.get("point")
+    # Mark the viewport centre separately from the detected current position:
+    # the first is a search hint, the second is measured pixel evidence.
+    canvas_center = marker["canvas_center"]
+    cv2.drawMarker(
+        overlay, (round(canvas_center[0]), round(canvas_center[1])),
+        (255, 180, 0), cv2.MARKER_CROSS, 12, 1,
+    )
     if point is not None:
-        cv2.circle(overlay, (round(point[0]), round(point[1])), 13, (0, 255, 255), 2)
+        px, py = round(point[0]), round(point[1])
+        cv2.circle(overlay, (px, py), 13, (0, 255, 255), 2)
+        cv2.putText(
+            overlay, "CURRENT POSITION?", (min(px + 18, input_tool_image.shape[1] - 180), max(py - 14, 20)),
+            cv2.FONT_HERSHEY_SIMPLEX, .5, (0, 255, 255), 1, cv2.LINE_AA,
+        )
     stop_line = local_stop_line_candidates(input_tool_image, point, overlay)
     ok, encoded_overlay = cv2.imencode(".png", overlay)
     if not ok:
@@ -87,19 +99,39 @@ def capture_and_analyze(
         "input_tool_overlay": overlay_path.relative_to(folder).as_posix(),
         "red_marker": marker,
         "location": {
-            "reference": "input_tool_red_marker",
+            "reference": "input_tool_current_position_red_marker",
+            "meaning": "current_user_position",
+            "status": marker["status"],
+            "coordinate_system": "captured_input_tool_image_pixels",
             "image_size": [int(input_tool_image.shape[1]), int(input_tool_image.shape[0])],
+            "canvas_bounds": marker["canvas_bounds"],
+            "canvas_center": marker["canvas_center"],
             "image_point": point,
+            "center_offset_px": marker["center_offset_px"],
             "normalized_point": (
                 [round(point[0] / input_tool_image.shape[1], 6),
                  round(point[1] / input_tool_image.shape[0], 6)]
                 if point is not None else None
             ),
-            "road_id": None, "angle_deg": None,
+            "canvas_normalized_point": (
+                [
+                    round((point[0] - marker["canvas_bounds"][0]) /
+                          (marker["canvas_bounds"][2] - marker["canvas_bounds"][0]), 6),
+                    round((point[1] - marker["canvas_bounds"][1]) /
+                          (marker["canvas_bounds"][3] - marker["canvas_bounds"][1]), 6),
+                ]
+                if point is not None else None
+            ),
+            "geographic_coordinates": None,
+            "is_intersection_center": False,
+            "road_id": None, "angle_deg": None, "heading_deg": None,
         },
         "checks": {"stop_line": stop_line},
         "human_review": "requires_human_review",
-        "warning": "정지선 후보는 확정 판정이 아닙니다. 위치 기준점과 선형은 현장 사진으로 검증해야 합니다.",
+        "warning": (
+            "빨간 표시는 현재 사용자 위치의 화면 좌표 후보입니다. 실제 지도 좌표·진행 방향은 "
+            "추정하지 않습니다. 정지선 후보도 사람 검수가 필요합니다."
+        ),
     }
     history_path = folder / f"individual_analysis_r{revision:03d}.json"
     _write_json(history_path, record)
