@@ -11,8 +11,8 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QObject, QTimer, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices, QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -392,6 +392,11 @@ class MainWindow(QMainWindow):
         self.individual_status = self._label("개별 촬영 전 · 빨간 점 기준점 미확인", "hint")
         self.individual_status.setWordWrap(True)
         individual_layout.addWidget(self.individual_status)
+        self.individual_overlay_btn = QPushButton("빨간 점 · 근거 이미지 보기")
+        self.individual_overlay_btn.setEnabled(False)
+        self.individual_overlay_btn.clicked.connect(self._open_individual_overlay)
+        individual_layout.addWidget(self.individual_overlay_btn)
+        self._individual_overlay_path = None
         self.individual_details = QTextEdit()
         self.individual_details.setReadOnly(True)
         self.individual_details.setPlaceholderText(
@@ -785,6 +790,8 @@ class MainWindow(QMainWindow):
             self.analysis_details.clear()
             self.individual_status.setText("개별 촬영 전 · 빨간 점 기준점 미확인")
             self.individual_details.clear()
+            self._individual_overlay_path = None
+            self.individual_overlay_btn.setEnabled(False)
             self.latest_folder = None
             self.folder_btn.setEnabled(False)
 
@@ -861,7 +868,7 @@ class MainWindow(QMainWindow):
     def _busy(self, busy: bool) -> None:
         for widget in (
             *self.stage_buttons.values(), self.start_btn,
-            self.individual_capture_btn, self.save_btn,
+            self.individual_capture_btn, self.individual_overlay_btn, self.save_btn,
             self.settings_btn,
             self.case_input, self.work_input, self.view_input,
             self.work_select_btn, self.view_select_btn, self.review_select_btn,
@@ -914,6 +921,12 @@ class MainWindow(QMainWindow):
             self._refresh_stage_states()
         elif kind == "individual_analysis":
             self.capture_tabs.setCurrentIndex(1)
+            self._individual_overlay_path = (
+                Path(result["folder"]) / result["input_tool_overlay"]
+            )
+            self.individual_overlay_btn.setEnabled(
+                self._individual_overlay_path.is_file()
+            )
             marker = result.get("red_marker", {})
             point = marker.get("point")
             stop = result.get("checks", {}).get("stop_line", {})
@@ -1088,6 +1101,11 @@ class MainWindow(QMainWindow):
             sizes[1] += grow
             self.panel_splitter.setSizes(sizes)
         self.analysis_details.verticalScrollBar().setValue(0)
+
+    def _open_individual_overlay(self) -> None:
+        path = self._individual_overlay_path
+        if path is not None and path.is_file():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _open_folder(self) -> None:
         if self.latest_folder and Path(self.latest_folder).is_dir():
