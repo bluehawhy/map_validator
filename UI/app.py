@@ -939,6 +939,7 @@ class MainWindow(QMainWindow):
             marker = result.get("red_marker", {})
             point = marker.get("point")
             stop = result.get("checks", {}).get("stop_line", {})
+            diagnostics = marker.get("diagnostics", {})
             location = result.get("location", {})
             marker_text = (
                 f"현재 위치 후보: ({point[0]:.1f}, {point[1]:.1f})px"
@@ -959,6 +960,14 @@ class MainWindow(QMainWindow):
                 f"도면 내부 상대 위치: {location.get('canvas_normalized_point', '미확인')}",
                 "실제 지도 좌표 / 현재 도로 / 진행 방향: 미확인",
                 f"검출 근거: {marker.get('reason', '')}",
+                "── 빨간 점 검출 단계별 진단 ──",
+                f"HSV 원본 빨간 픽셀: {diagnostics.get('hsv_red_pixels', '미확인')}",
+                f"원본 연결 객체: {diagnostics.get('raw_component_count', '미확인')}",
+                f"3×3 OPENING 후 빨간 픽셀: {diagnostics.get('opening_pixels', '미확인')}",
+                f"OPENING 후 연결 객체: {diagnostics.get('opened_component_count', '미확인')}",
+                f"형태필터 통과: {diagnostics.get('accepted_count', '미확인')}",
+                f"형태필터 탈락 내역: {diagnostics.get('rejected_by_rule', {})}",
+                f"도면 중앙 근접 원본 객체(최대 8개): {diagnostics.get('raw_nearest_components', [])}",
                 f"정지선: {stop.get('reason', '판단 보류')}",
                 f"근거 ROI: {stop.get('roi', '위치 미확인')}",
                 f"시안색 선 후보: {len(candidates)}개",
