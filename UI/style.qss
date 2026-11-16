@@ -106,3 +106,24 @@ QPushButton#stage_capture[stageCaptured="true"]:disabled {
     border-color: #73AC89;
     color: #F4FAF5;
 }
+
+/* Two independent capture / inspection tabs. */
+QTabWidget#captureTabs::pane {
+    border: 1px solid rgba(205, 211, 216, 140);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 75);
+}
+QTabWidget#captureTabs QTabBar::tab {
+    background: rgba(232, 236, 240, 205);
+    color: #46545E;
+    border: 1px solid rgba(210, 218, 223, 150);
+    border-top-left-radius: 7px;
+    border-top-right-radius: 7px;
+    padding: 6px 10px;
+    font-size: 11px;
+}
+QTabWidget#captureTabs QTabBar::tab:selected {
+    background: #FFFFFF;
+    color: #246F9D;
+    font-weight: bold;
+}

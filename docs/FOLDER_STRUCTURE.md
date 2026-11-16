@@ -79,3 +79,47 @@ map_validator/
 | 보고서 형식·판정 상태 설명 | `docs/REQUIREMENTS.md` 및 엔진 보고서 코드 |
 
 새로 구현한 4단계 수동 촬영·선형/도로/건물 후보 비교는 단계 정의, 이미지 추출, 검수 비교 모듈로 분리했다. 점수 데이터는 검수 ID별 `road_scores.json`·`score_history/`에 보존하고 모든 교차로의 최신값은 `output.directory/road_scores.csv` 한 파일에서 집계한다. 해당 CSV와 원본 스코어 이력은 로컬 업무 자료이므로 Git에서 제외한다. 차로 수·복합 화살표·유도선 개수 등의 정확한 자동 인식은 현장 표본과 명확한 입력툴 표시 기준을 바탕으로 보완한다. 향후 정확한 3D 도로 좌표 비교가 필요하면 지도 기준점·카메라 자세·위치 보정 기능을 별도 모듈로 설계한다. 실제 데이터와 결과는 `results/`, `config.yaml`, 로컬 캐시에 두고 버전 관리하지 않는다.
+
+## 2026-11-16 추가된 항목 중심 분석 구조
+
+```text
+map_validator/
+├── analysis/
+│   ├── findings.py                # unknown/candidate 공통 증거값
+│   ├── input_tool/               # 입력툴 기대값: 항목별 인식
+│   │   ├── features.py           # 항목별 호출 조합
+│   │   ├── road_geometry.py      # 기존 색상 경로 후보
+│   │   ├── lane_count.py
+│   │   ├── stop_line.py
+│   │   ├── lane_arrows.py
+│   │   ├── guidance_line.py
+│   │   ├── colored_guidance.py
+│   │   ├── red_marker.py         # 개별 촬영 빨간 기준점 후보
+│   │   └── local_stop_line.py    # 기준점 주변 시안색 선 후보
+│   └── roadview/                 # 로드뷰 관측: 항목별 인식
+│       ├── features.py
+│       ├── road_presence.py
+│       ├── lane_count.py
+│       ├── stop_line.py
+│       ├── lane_arrows.py
+│       ├── guidance_line.py
+│       └── colored_guidance.py
+├── comparison/                   # 도로별이 아닌 항목별 판정 규칙
+│   ├── rules.py
+│   ├── common.py
+│   ├── road_presence.py
+│   ├── lane_count.py
+│   ├── stop_line.py
+│   ├── lane_arrows.py
+│   ├── guidance_line.py
+│   └── colored_guidance.py
+├── intersection/roads.py        # road_id / angle_deg / role / checks
+└── individual_capture.py        # 개별 원본·근거·보고서·이력 저장
+
+UI/app.py                           # 두 탭, 개별 근거 이미지 열기
+UI/worker.py                        # 기존 4단계와 개별 WGC 작업
+```
+
+기존 `input_features.py` / `roadview_features.py`는 호환 진입점으로 유지하며, 이전 `stop_line.py` 등에는 기존 검출 코드가 남아있다. 더 이상 호출되지 않는 레거시를 **참조 검증 없이 삭제하지 않는다**.
+
+자세한 데이터 구분은 [FEATURE_ANALYSIS_REFACTOR.md](FEATURE_ANALYSIS_REFACTOR.md).
