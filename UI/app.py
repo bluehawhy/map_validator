@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QScrollArea,
     QSplitter,
+    QTabWidget,
     QFrame,
     QDoubleSpinBox,
     QPushButton,
@@ -303,6 +304,9 @@ class MainWindow(QMainWindow):
         self.panel_splitter.setObjectName("reviewSplitter")
         self.panel_splitter.setChildrenCollapsible(False)
         layout.addWidget(self.panel_splitter, 1)
+        self.capture_tabs = QTabWidget()
+        self.capture_tabs.setObjectName("captureTabs")
+        self.panel_splitter.addWidget(self.capture_tabs)
 
         steps_scroller = QScrollArea()
         self.steps_scroller = steps_scroller
@@ -316,7 +320,7 @@ class MainWindow(QMainWindow):
         sections.setContentsMargins(1, 0, 4, 0)
         sections.setSpacing(6)
         steps_scroller.setWidget(content)
-        self.panel_splitter.addWidget(steps_scroller)
+        self.capture_tabs.addTab(steps_scroller, "단계별 수동 촬영")
 
         from map_validator.stage_types import STAGES, STAGE_BUTTONS, STAGE_LABELS
 
@@ -363,6 +367,38 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.stop_btn, 1)
         sections.addLayout(actions)
         sections.addStretch(1)
+
+        # Independent one-shot review of an input_tool capture at the red marker.
+        individual_page = QWidget()
+        individual_layout = QVBoxLayout(individual_page)
+        individual_layout.setContentsMargins(9, 8, 9, 8)
+        individual_layout.setSpacing(6)
+        individual_note = self._label(
+            "현재 input_tool 화면만 WGC 촬영합니다. 빨간 점을 위치 기준으로 "
+            "정지선 후보를 찾으며, 기준점이 불명확하면 판단 보류합니다.",
+            "hint",
+        )
+        individual_note.setWordWrap(True)
+        individual_layout.addWidget(individual_note)
+        self.individual_capture_btn = QPushButton("개별 촬영 · 정지선 분석")
+        self.individual_capture_btn.setObjectName("primary")
+        self.individual_capture_btn.setToolTip(
+            "기존 단계별 촬영을 변경하지 않고 현재 input_tool 화면을 별도로 저장합니다."
+        )
+        self.individual_capture_btn.clicked.connect(
+            lambda: self._start("capture_individual")
+        )
+        individual_layout.addWidget(self.individual_capture_btn)
+        self.individual_status = self._label("개별 촬영 전 · 빨간 점 기준점 미확인", "hint")
+        self.individual_status.setWordWrap(True)
+        individual_layout.addWidget(self.individual_status)
+        self.individual_details = QTextEdit()
+        self.individual_details.setReadOnly(True)
+        self.individual_details.setPlaceholderText(
+            "개별 촬영 후 빨간 점 위치와 정지선 후보 좌표·근거 이미지 경로를 표시합니다."
+        )
+        individual_layout.addWidget(self.individual_details, 1)
+        self.capture_tabs.addTab(individual_page, "개별 촬영 분석")
 
         self._panels = {}
         result_panel = QFrame()
@@ -747,6 +783,8 @@ class MainWindow(QMainWindow):
             self._displayed_case_id = current_id
             self.geometry_result.setText("검수 ID 변경 · 촬영본 분석 전")
             self.analysis_details.clear()
+            self.individual_status.setText("개별 촬영 전 · 빨간 점 기준점 미확인")
+            self.individual_details.clear()
             self.latest_folder = None
             self.folder_btn.setEnabled(False)
 
@@ -779,7 +817,7 @@ class MainWindow(QMainWindow):
         try:
             from map_validator.stage_types import STAGES
 
-            valid = {"analyze_staged"} | {"capture_" + stage for stage in STAGES}
+            valid = {"analyze_staged", "capture_individual"} | {"capture_" + stage for stage in STAGES}
             if action not in valid:
                 raise ValueError(f"지원하지 않는 작업입니다: {action}")
             cfg = self._current_settings()
@@ -791,7 +829,7 @@ class MainWindow(QMainWindow):
                     "검수 ID가 없습니다. 교차로 선형 검수에서 Polygon/Link를 선택하세요."
                 )
             if action != "analyze_staged":
-                if not cfg["windows"]["roadview_title"].strip():
+                if action != "capture_individual" and not cfg["windows"]["roadview_title"].strip():
                     raise ValueError("로드뷰 창 제목을 입력하세요.")
                 if not cfg["windows"]["work_title"].strip():
                     raise ValueError("업무 창 제목을 입력하세요.")
@@ -822,7 +860,8 @@ class MainWindow(QMainWindow):
 
     def _busy(self, busy: bool) -> None:
         for widget in (
-            *self.stage_buttons.values(), self.start_btn, self.save_btn,
+            *self.stage_buttons.values(), self.start_btn,
+            self.individual_capture_btn, self.save_btn,
             self.settings_btn,
             self.case_input, self.work_input, self.view_input,
             self.work_select_btn, self.view_select_btn, self.review_select_btn,
@@ -873,6 +912,46 @@ class MainWindow(QMainWindow):
             self.geometry_result.setText("사진 변경됨 · 촬영본 분석을 다시 실행하세요")
             self.analysis_details.clear()
             self._refresh_stage_states()
+        elif kind == "individual_analysis":
+            self.capture_tabs.setCurrentIndex(1)
+            marker = result.get("red_marker", {})
+            point = marker.get("point")
+            stop = result.get("checks", {}).get("stop_line", {})
+            marker_text = (
+                f"빨간 점 후보: ({point[0]:.1f}, {point[1]:.1f})"
+                if point is not None else "빨간 점 미확인"
+            )
+            candidates = stop.get("line_candidates", [])
+            self.individual_status.setText(
+                f"개별 촬영 {result['revision']}회 · {marker_text} · "
+                f"정지선 후보 {len(candidates)}개 · 사람 검수 필요"
+            )
+            details = [
+                f"검수 ID: {result['case_id']}",
+                f"빨간 점: {marker.get('status', 'unknown')} · {marker.get('reason', '')}",
+                f"위치 좌표: {point if point is not None else '판단 보류'}",
+                f"정지선: {stop.get('reason', '판단 보류')}",
+                f"근거 ROI: {stop.get('roi', '위치 미확인')}",
+                f"시안색 선 후보: {len(candidates)}개",
+            ]
+            for i, candidate in enumerate(candidates, 1):
+                details.append(
+                    f"  {i}. 좌표 {candidate['endpoints']} "
+                    f"길이 {candidate['length_px']}px"
+                )
+            details.extend([
+                "※ 선 후보는 정지선 확정이 아닙니다. 횡단보도/도로 경계를 구별하세요.",
+                f"원본: {result['input_tool_image']}",
+                f"근거: {result['input_tool_overlay']}",
+                f"보고서: individual_analysis.json",
+            ])
+            self.individual_details.setPlainText("\n".join(details))
+            self.individual_details.verticalScrollBar().setValue(0)
+            self.status_label.setText("개별 촬영 분석 완료 · 최종 검수 필요")
+            self._log(
+                f"개별 촬영 {result['revision']}회 · {marker_text} · "
+                f"시안색 선 후보 {len(candidates)}개"
+            )
         elif kind == "staged_analysis":
             from map_validator.stage_types import STAGES, STAGE_LABELS, FIELD_LABELS
 
