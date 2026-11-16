@@ -145,3 +145,7 @@ output.directory/
 ```
 
 `UI/image_preview.py`는 PyQt6 확대 근거 미리보기를 전담한다. 개별 임시 촬영 기록은 단계별 스테이지 원본이나 정식 검수 ID 폴더를 변경하지 않는다.
+
+## 선 그룹 공통 모듈 (2026-11-16)
+
+`map_validator/analysis/line_grouping.py`는 개별 정지선 후보를 비롯하여 향후 차선·중앙선·유도선에 재사용할 **선 조각 기하 그룹화**를 담당한다. 특징별 판단/검출 코드는 기존 `analysis/input_tool/`, `analysis/roadview/` 아래 유지하고, 공통 그룹화 파일 안에서는 어떤 표시가 정지선·차선·중앙선인지 판별하지 않는다.
