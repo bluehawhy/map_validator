@@ -230,7 +230,7 @@ def analyze_stages(
 
         revision = int(record.get("revision", 0))
         overlay_dir = folder / "overlays"
-        input_annotated = overlay_dir / f"{stage}_r{revision:02d}_input.png"
+        input_annotated = overlay_dir / f"{stage}_r{revision:02d}_input_tool.png"
         road_annotated = overlay_dir / f"{stage}_r{revision:02d}_roadview.png"
         _write_image(input_annotated, input_overlay)
         _write_image(road_annotated, road_overlay)
@@ -257,8 +257,10 @@ def analyze_stages(
             },
             "evidence": {
                 "input_image": input_path.relative_to(folder).as_posix(),
+                "input_tool_image": input_path.relative_to(folder).as_posix(),
                 "roadview_image": road_path.relative_to(folder).as_posix(),
                 "input_overlay": input_annotated.relative_to(folder).as_posix(),
+                "input_tool_overlay": input_annotated.relative_to(folder).as_posix(),
                 "roadview_overlay": road_annotated.relative_to(folder).as_posix(),
             },
             "human_review": "requires_human_review",
