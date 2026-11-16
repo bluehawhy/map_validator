@@ -1,8 +1,7 @@
-"""Yellow input-tool centre-line candidates for visual human review.
+"""Grouped axis-line candidates shared by yellow centre and white lane markings.
 
-Detect horizontal and vertical yellow road markings within the same ROI as
-individual stop-line review. An image-space candidate is not a verified
-centre line, and a group count is not a surveyed centre-line count.
+The detector supplies image-space candidates for human review, not definitive
+road-line classifications or lane counts.
 """
 from __future__ import annotations
 
@@ -20,24 +19,37 @@ def local_center_line_candidates(
     *,
     roi: list[int] | None,
 ) -> dict:
+    return _detect_axis_line_candidates(image, point, overlay, roi=roi, lane=False)
+
+
+def _detect_axis_line_candidates(
+    image: np.ndarray,
+    point: list[float] | None,
+    overlay: np.ndarray,
+    *,
+    roi: list[int] | None,
+    lane: bool,
+) -> dict:
+    marking = "흰색 차선" if lane else "노란 중앙선"
     if point is None or roi is None:
-        return unknown("현재 위치 또는 검색 ROI가 확인되지 않아 노란 중앙선 후보를 분석하지 않았습니다.")
+        return unknown(f"현재 위치 또는 검색 ROI가 확인되지 않아 {marking} 후보를 분석하지 않았습니다.")
 
     height, width = image.shape[:2]
     x0, y0, x1, y1 = (int(value) for value in roi)
     x0, y0 = max(0, x0), max(0, y0)
     x1, y1 = min(width, x1), min(height, y1)
     if x1 <= x0 or y1 <= y0:
-        return unknown("중앙선 검색 ROI가 유효하지 않습니다.")
+        return unknown(f"{marking} 검색 ROI가 유효하지 않습니다.")
 
     hsv = cv2.cvtColor(image[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
-    # Initial field-tunable yellow range; text and other yellow UI elements
-    # may still become candidates and must be checked in the overlay.
-    yellow = cv2.inRange(hsv, (18, 125, 135), (38, 255, 255))
-    yellow = cv2.morphologyEx(yellow, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
+    # Same geometry for both classes; only HSV mask and marker style differ.
+    # Bright low-saturation white may include text or other road symbols.
+    mask = (cv2.inRange(hsv, (0, 0, 185), (179, 65, 255)) if lane else
+            cv2.inRange(hsv, (18, 125, 135), (38, 255, 255)))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
     minimum = max(14, round(min(width, height) * .042))
     hough = cv2.HoughLinesP(
-        yellow, 1, np.pi / 180,
+        mask, 1, np.pi / 180,
         threshold=max(9, minimum // 2),
         minLineLength=minimum,
         maxLineGap=5,
@@ -65,7 +77,7 @@ def local_center_line_candidates(
     total_segments = len(segments)
     segments = segments[:72]
     for idx, segment in enumerate(segments, 1):
-        segment["candidate_id"] = f"Y{idx}"
+        segment["candidate_id"] = f"{'W' if lane else 'Y'}{idx}"
 
     # Tighter lateral grouping than the stop-line default: a second or fourth
     # parallel centre line must remain a separate candidate when resolvable.
@@ -76,7 +88,7 @@ def local_center_line_candidates(
         max_gap_px=12.0,
     )
     for idx, group in enumerate(groups, 1):
-        group["group_id"] = f"C{idx}"
+        group["group_id"] = f"{'L' if lane else 'C'}{idx}"
         a, b = group["endpoints"]
         group["point"] = [round((a[0] + b[0]) / 2, 1),
                           round((a[1] + b[1]) / 2, 1)]
@@ -88,13 +100,17 @@ def local_center_line_candidates(
     # Paint group-level representative points, not one marker per Hough
     # fragment; show a limited number to keep the stop-line overlay legible.
     shown = groups[:24]
+    # BGR colours: yellow centre marker (blue/orange), white-lane marker (violet).
+    line_color = (205, 75, 245) if lane else (255, 165, 0)
+    point_color = (205, 75, 245) if lane else (255, 190, 0)
+    text_color = (240, 210, 255) if lane else (255, 205, 40)
     for group in shown:
         a, b = group["endpoints"]
         pa = tuple(round(value) for value in a)
         pb = tuple(round(value) for value in b)
         px, py = (round(value) for value in group["point"])
-        cv2.line(overlay, pa, pb, (255, 165, 0), 2, cv2.LINE_AA)
-        cv2.circle(overlay, (px, py), 8, (255, 190, 0), -1, cv2.LINE_AA)
+        cv2.line(overlay, pa, pb, line_color, 2, cv2.LINE_AA)
+        cv2.circle(overlay, (px, py), 8, point_color, -1, cv2.LINE_AA)
         cv2.circle(overlay, (px, py), 3, (255, 255, 255), -1, cv2.LINE_AA)
         label = group["group_id"]
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -105,17 +121,18 @@ def local_center_line_candidates(
         cv2.rectangle(overlay, (tx - 4, ty - th - 4),
                       (tx + tw + 4, ty + baseline + 4), (20, 20, 20), -1)
         cv2.putText(overlay, label, (tx, ty), font, scale,
-                    (255, 205, 40), thickness, cv2.LINE_AA)
+                    text_color, thickness, cv2.LINE_AA)
 
     return {
         "value": None,
         "confidence": None,
-        "method": "local_yellow_axis_lines_grouped_points_v1",
-        "reason": ("노란색 수평/수직 선 그룹의 중간점을 표시했습니다. "
-                   "실제 중앙선 여부와 개수는 사람 검수가 필요합니다."
+        "method": ("local_white_axis_lines_grouped_points_v1" if lane else
+                   "local_yellow_axis_lines_grouped_points_v1"),
+        "reason": (f"{marking} 수평/수직 선 그룹의 중간점을 표시했습니다. "
+                   "실제 차선/중앙선 여부와 개수는 사람 검수가 필요합니다."
                    if groups else
-                   "분석 ROI에서 노란색 수평/수직 선 후보를 찾지 못했습니다. "
-                   "중앙선 없음으로 확정하지 않습니다."),
+                   f"분석 ROI에서 {marking} 수평/수직 선 후보를 찾지 못했습니다. "
+                   "선 없음으로 확정하지 않습니다."),
         "roi": [x0, y0, x1, y1],
         "total_segments": total_segments,
         "shown_segments": len(segments),

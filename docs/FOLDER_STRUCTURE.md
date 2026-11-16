@@ -149,3 +149,10 @@ output.directory/
 ## 선 그룹 공통 모듈 (2026-11-16)
 
 `map_validator/analysis/line_grouping.py`는 개별 정지선 후보를 비롯하여 향후 차선·중앙선·유도선에 재사용할 **선 조각 기하 그룹화**를 담당한다. 현재 정지선 후보와 노란 중앙선 후보에 재사용하며, 특징별 검출은 `analysis/input_tool/local_stop_line.py`와 `analysis/input_tool/local_center_line.py`로 분리한다. 기존 원본 PNG 파일 구조는 유지하며 C 포인트 및 중앙선 그룹은 `individual_analysis*.json`의 `checks.center_line`에 추가한다.
+
+## 흰색 차선 포인트 검출 (2026-11-17)
+
+- `map_validator/analysis/input_tool/local_center_line.py`: 중앙선/차선 공통 HSV·Hough·기하학적 그룹화 알고리즘
+- `map_validator/analysis/input_tool/local_lane_line.py`: 흰색 마스크를 선택하는 차선 후보 진입점
+- `map_validator/individual_capture.py`: 개별 촬영 재분석 시 `checks.lane_line` 기록과 오버레이 생성
+- `UI/app.py`: L# 후보 개수·픽셀 좌표·그룹 구성 표시

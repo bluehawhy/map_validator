@@ -16,6 +16,7 @@ import numpy as np
 
 from .analysis.input_tool.local_stop_line import local_stop_line_candidates
 from .analysis.input_tool.local_center_line import local_center_line_candidates
+from .analysis.input_tool.local_lane_line import local_lane_line_candidates
 from .analysis.input_tool.red_marker import find_red_marker
 from .stage_types import validate_case_id
 
@@ -162,6 +163,21 @@ def capture_and_analyze(
             group["group_id"], group["point"], group["orientation"],
             ",".join(group["member_ids"]),
         )
+    lane_line = local_lane_line_candidates(
+        input_tool_image, point, overlay, roi=stop_line.get("roi"),
+    )
+    APP_LOG.info(
+        "[개별촬영][차선] 흰색조각=%s L포인트=%s 생략=%s ROI=%s",
+        lane_line.get("total_segments", 0),
+        lane_line.get("shown_points", 0),
+        lane_line.get("omitted_points", 0), lane_line.get("roi"),
+    )
+    for group in lane_line.get("line_groups", []):
+        APP_LOG.info(
+            "[개별촬영][차선] %s 좌표=%s 방향=%s 구성=%s",
+            group["group_id"], group["point"], group["orientation"],
+            ",".join(group["member_ids"]),
+        )
     ok, encoded_overlay = cv2.imencode(".png", overlay)
     if not ok:
         raise RuntimeError("분석 근거 이미지 PNG 인코딩에 실패했습니다.")
@@ -236,11 +252,12 @@ def capture_and_analyze(
             "is_intersection_center": False,
             "road_id": None, "angle_deg": None, "heading_deg": None,
         },
-        "checks": {"stop_line": stop_line, "center_line": center_line},
+        "checks": {"stop_line": stop_line, "center_line": center_line,
+                   "lane_line": lane_line},
         "human_review": "requires_human_review",
         "warning": (
             "빨간 표시는 현재 사용자 위치의 화면 좌표 후보입니다. 실제 지도 좌표·진행 방향은 "
-            "추정하지 않습니다. 정지선·노란 중앙선 후보도 사람 검수가 필요합니다."
+            "추정하지 않습니다. 정지선·노란 중앙선·흰색 차선 후보도 사람 검수가 필요합니다."
         ),
     }
     history_path = folder / f"individual_analysis_r{revision:03d}.json"
