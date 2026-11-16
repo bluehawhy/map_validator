@@ -298,15 +298,19 @@ class MainWindow(QMainWindow):
         output_row.addWidget(output_browse)
         layout.addLayout(output_row)
 
-        # Three independently resizable areas keep capture controls visible,
-        # while review results and log output use their own collapsible widgets.
+        # Entire pages, not a narrow tab strip inside the capture pane.
+        self.capture_tabs = QTabWidget()
+        self.capture_tabs.setObjectName("captureTabs")
+        layout.addWidget(self.capture_tabs, 1)
+        staged_page = QWidget()
+        staged_layout = QVBoxLayout(staged_page)
+        staged_layout.setContentsMargins(4, 6, 4, 4)
+        # Staged capture, staged comparison and logs remain resizable.
         self.panel_splitter = QSplitter(Qt.Orientation.Vertical)
         self.panel_splitter.setObjectName("reviewSplitter")
         self.panel_splitter.setChildrenCollapsible(False)
-        layout.addWidget(self.panel_splitter, 1)
-        self.capture_tabs = QTabWidget()
-        self.capture_tabs.setObjectName("captureTabs")
-        self.panel_splitter.addWidget(self.capture_tabs)
+        staged_layout.addWidget(self.panel_splitter, 1)
+        self.capture_tabs.addTab(staged_page, "단계별 수동 촬영")
 
         steps_scroller = QScrollArea()
         self.steps_scroller = steps_scroller
@@ -320,7 +324,7 @@ class MainWindow(QMainWindow):
         sections.setContentsMargins(1, 0, 4, 0)
         sections.setSpacing(6)
         steps_scroller.setWidget(content)
-        self.capture_tabs.addTab(steps_scroller, "단계별 수동 촬영")
+        self.panel_splitter.addWidget(steps_scroller)
 
         from map_validator.stage_types import STAGES, STAGE_BUTTONS, STAGE_LABELS
 
@@ -876,6 +880,11 @@ class MainWindow(QMainWindow):
             self.output_input,
         ):
             widget.setEnabled(not busy)
+        self.individual_overlay_btn.setEnabled(
+            not busy
+            and self._individual_overlay_path is not None
+            and self._individual_overlay_path.is_file()
+        )
         self.stop_btn.setEnabled(busy)
         if self.review_monitor is not None:
             self.review_monitor.set_paused(busy)
