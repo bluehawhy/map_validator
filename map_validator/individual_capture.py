@@ -6,6 +6,7 @@ locates the red marker and saves local stop-line candidates for human feedback.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from .analysis.input_tool.red_marker import find_red_marker
 from .stage_types import validate_case_id
 
 MANIFEST = "individual_capture.json"
+APP_LOG = logging.getLogger("map_validator.individual_capture")
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -62,7 +64,20 @@ def capture_and_analyze(
     finally:
         temp_path.unlink(missing_ok=True)
 
+    APP_LOG.info(
+        "[개별촬영][위치진단] 촬영버전=%d input_tool이미지=%dx%d "
+        "검출시작 (실제지도좌표/진행방향은 추정하지 않음)",
+        revision, input_tool_image.shape[1], input_tool_image.shape[0],
+    )
     marker = find_red_marker(input_tool_image)
+    APP_LOG.info(
+        "[개별촬영][위치진단] 결과=%s 후보좌표=%s 후보개수=%d "
+        "원본빨강픽셀=%d OPENING후픽셀=%d 사유=%s",
+        marker["status"], marker.get("point"), len(marker.get("candidates", [])),
+        marker.get("diagnostics", {}).get("hsv_red_pixels", -1),
+        marker.get("diagnostics", {}).get("opening_pixels", -1),
+        marker.get("reason", ""),
+    )
     overlay = input_tool_image.copy()
     point = marker.get("point")
     # Mark the viewport centre separately from the detected current position:
@@ -80,6 +95,11 @@ def capture_and_analyze(
             cv2.FONT_HERSHEY_SIMPLEX, .5, (0, 255, 255), 1, cv2.LINE_AA,
         )
     stop_line = local_stop_line_candidates(input_tool_image, point, overlay)
+    APP_LOG.info(
+        "[개별촬영][위치진단] 주변정지선분석=%s 분석ROI=%s 시안색선후보=%d",
+        "진행" if point is not None else "건너뜀(위치미확인)",
+        stop_line.get("roi"), len(stop_line.get("line_candidates", [])),
+    )
     ok, encoded_overlay = cv2.imencode(".png", overlay)
     if not ok:
         raise RuntimeError("분석 근거 이미지 PNG 인코딩에 실패했습니다.")
@@ -142,6 +162,12 @@ def capture_and_analyze(
         "analysis": history_path.name,
     })
     _write_json(manifest_path, manifest)
+    APP_LOG.info(
+        "[개별촬영][위치진단] 완료 촬영버전=%d 원본=%s 근거오버레이=%s "
+        "보고서=%s 상태=%s",
+        revision, raw_path.name, overlay_path.name, history_path.name,
+        marker["status"],
+    )
     return {
         "kind": "individual_analysis", "folder": str(folder), "case_id": case_id,
         **record,
