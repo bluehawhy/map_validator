@@ -6,7 +6,7 @@ it does not classify the line's purpose or approve an inspection result.
 """
 from __future__ import annotations
 
-from math import atan2, cos, degrees, hypot, pi, radians, sin
+from math import atan2, cos, degrees, hypot, pi, sin
 from typing import Sequence
 
 
@@ -33,7 +33,7 @@ def _angle_difference_deg(a: float, b: float) -> float:
 
 
 def _perpendicular_distance(a: dict, b: dict) -> float:
-    """Midpoint-to-infinite-line offset, averaged in both directions."""
+    """Maximum of both midpoint-to-line perpendicular offsets."""
     offsets = []
     for base, other in ((a, b), (b, a)):
         nx, ny = -sin(base["angle"]), cos(base["angle"])
