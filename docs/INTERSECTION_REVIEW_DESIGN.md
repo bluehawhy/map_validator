@@ -412,3 +412,10 @@ output.directory/
 - `map_validator/analysis/input_tool/local_stop_line.py`에서 `detect_stop_line_reference`를 삭제하고 `guide_roi`, `stop_reference` 인수와 연결된 계산을 제거한다. `local_guidance_line.py`에서도 `stop_line_y`, `stop_reference` 인수를 제거한다. `individual_capture.py`는 동일한 `point`와 `canvas_bounds`를 세 검출기에 각각 전달한다. JSON의 `stop_line_reference` 최상위 필드는 새 분석 결과에서 제거하며, 검사 목적 외부 원본 PNG와 이전 분석 이력은 보존한다.
 - 기존 S/G 및 A 공통 STOP ROI, U GUIDE, P PATH, C/W의 내부 후보 검출(`candidate_search_bounds`)은 유지한다. LINE ROI 테두리는 복구하지 않는다. 또한 정지선 검출의 선 길이 계산에서 이미지 크기 변수의 기존 불일치(`height,width` 미정의)를 `h,w`로 바로잡는다.
 - **검증 상태:** 원격 소스·호출 관계 정적 확인만 실시. Windows 현장 실행·자동 테스트 및 테스트 코드 추가는 요청받지 않아 수행하지 않았다.
+
+## 2026-11-17 상단 분석 설정창 확장 — 노란 중앙선 그룹화
+
+- 기존 ⚙ 분석 설정 모달에서 **로드뷰 정지선 threshold** 아래에 **입력툴 노란 중앙선** 그룹화 세 가지 입력을 배치한다: 기울기 차이(기본 8°), 같은 선상 수직거리(기본 5px), 선 방향 연결 간격(기본 12px).
+- 입력은 `QDoubleSpinBox`이고 각각 0~30°, 0~30px, 0~120px로 제한한다. 기존 **저장/취소** 버튼을 공유하고, 저장 시 세 값을 하나의 `analysis.center_line_grouping` 설정 묶음으로 로컬 YAML에 기록한다. 모달에서 취소하면 수정 내용을 버린다.
+- 분석 스레드가 시작할 때 설정 스냅샷을 전달하며 `local_center_line_candidates`에서 공통 그룹화 함수에 매개변수로 적용한다. 기존 촬영본 재분석 시 오버레이 및 결과 JSON만 갱신하고 원본은 보존한다. 그룹 구성과 실제 적용 임계값을 결과 상세·JSON에서 확인할 수 있다.
+- 정지선 S/G, 흰선 W, GUIDE/PATH ROI 및 사용자 수동 WGC 촬영 흐름에는 영향이 없다. 사용자의 현장 조정 값을 실제 중앙선 수의 확정 기준으로 간주하지 않는다.
