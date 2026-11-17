@@ -388,3 +388,11 @@ output.directory/
 - GUIDE ROI는 빨간 현재 위치 `point`와 검은 도면 경계 `canvas_bounds`로 독립 계산한다. **좌우 반폭 도면 너비의 18%(최소 55px), 위쪽 도면 높이 65%(최소 45px), 아래쪽 4%(최소 16px)**이며 도면 경계에 맞춰 자른다. 현재 위치가 유효하지 않으면 임의의 영역을 만들지 않는다. 빨간 현재 위치 표시점 주변의 상단 도면까지 포함할 수 있고, **STOP ROI의 상단 및 HDL View 글자 하단으로 GUIDE ROI 상단을 제한하지 않는다.**
 - `GUIDE ROI` 자주색 테두리, U# 후보·원본 RGB(0,128,255)·8연결 그룹화는 유지한다. 결과 `checks.guidance_lines.roi`와 `roi_rules.positioning=vehicle_position_to_canvas_top`, `position_point_px`, `canvas_bounds`에 계산 기준을 기록한다.
 - `STOP ROI`의 S/G/C/A/W와 `PATH ROI`의 P#는 **이번 변경에서 범위·기준을 수정하지 않는다**. WGC 수동 촬영 및 기존 원본 PNG·JSON 이력은 보존한다. Windows 실환경에서 ROI 크기/유도선 포함률은 별도 현장 확인이 필요하며 테스트 코드는 추가·실행하지 않았다.
+
+## 2026-11-17 STOP ROI 축소 및 노면화살표 검출 범위 동일화
+
+- 빨간 차량 현재 위치 `point`와 실제 검은 도면 `canvas_bounds` 기준으로 `STOP ROI`를 작게 계산한다. 좌우 반폭 도면 너비의 **18%**(최소 55px), 위쪽 도면 높이의 **25%**(최소 45px), 아래쪽 도면 높이의 **10%**(최소 35px). `blue_markings.stop_roi`에서 조정할 수 있으며 도면 경계를 넘지 않는다.
+- **정지선 S#/G#와 노면화살표 A#는 같은 `checks.stop_line.roi` 좌표를 공유**한다. 기존 `local_road_arrow_candidates(..., roi=stop_line.get("roi"))`를 유지하여 화살표가 작은 STOP ROI 밖에서 검출되지 않도록 했다. 화살표 색상·회색 사각형·초록 테두리·흰색 제외 로직은 수정하지 않았다.
+- 이전 넓은 검출 영역(HDL View/Input 글자 하단+10px 상단, 좌우 이미지 너비 31%, 현재위치 아래 이미지 높이 44%)은 `checks.stop_line.context_roi`로 분리했다. **중앙선 C, 흰선 W, 진입 경로선 P**는 이 넓은 영역을 계속 사용한다. GUIDE ROI(U)는 독립적으로 위쪽 탐색을 계속한다. 텍스트 기준이 확인되지 않으면 LINE 및 P 분석만 보류하고, STOP·A는 빨간 차량 위치가 검출되면 수행한다.
+- 근거 이미지에 작은 주황색 `STOP ROI`(S/G·A)와 옅은 회색 `LINE ROI`(C/W/P) 테두리를 각각 표시한다. `review_regions`도 실제 분석 범위와 일치시킨다. 기존 WGC 원본·촬영 이력은 보존하고 새 분석 결과만 갱신한다.
+- **현장 미검증:** 차량 위치가 교차로에 가까운 정도에 따라 STOP/A 후보가 작은 범위에서 누락될 수 있다. Windows 현장 분석과 자동 테스트는 요청받지 않아 실행하지 않았다.

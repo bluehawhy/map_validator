@@ -11,7 +11,7 @@ import numpy as np
 from ..findings import unknown
 from ..line_grouping import group_line_segments
 from .local_ui_text import detect_hdl_view_text_bottom
-from .blue_palette import blue_color_mask
+from .blue_palette import blue_color_mask, blue_palette
 
 
 def local_stop_line_candidates(
@@ -22,41 +22,53 @@ def local_stop_line_candidates(
         return unknown("빨간 기준점이 확정되지 않아 주변 정지선을 분석하지 않았습니다.")
 
     height, width = image.shape[:2]
-    cx, cy = point
-    text_anchor = detect_hdl_view_text_bottom(image, canvas_bounds)
-    if text_anchor["status"] != "found":
+    if canvas_bounds is None or len(canvas_bounds) != 4:
         return {
-            **unknown(
-                "HDL View 글자 하단을 확인하지 못해 선형 분석을 보류했습니다: "
-                + text_anchor["reason"]
-            ),
-            "roi": None,
-            "roi_rules": {
-                "positioning": "hdl_view_text_bottom",
-                "anchor_status": "not_found",
-                "text_anchor": text_anchor,
-            },
+            **unknown("도면 경계가 없어 차량 기준 STOP ROI를 계산할 수 없습니다."),
+            "roi": None, "context_roi": None,
+        }
+    cx, cy = float(point[0]), float(point[1])
+    left, top, right, bottom = map(int, canvas_bounds)
+    left, top = max(0, left), max(0, top)
+    right, bottom = min(width, right), min(height, bottom)
+    if not (left <= cx < right and top <= cy < bottom):
+        return {
+            **unknown("현재 위치가 도면 경계 밖이어서 STOP ROI를 계산할 수 없습니다."),
+            "roi": None, "context_roi": None,
         }
 
-    # All four line/object detectors share this ROI. Its top tracks the
-    # actual status-text row; no fixed percentage or guessed fallback is used.
-    radius_x = max(55, round(width * .31))
-    radius_below = max(55, round(height * .44))
-    _, canvas_top, _, canvas_bottom = map(int, canvas_bounds)
-    x0 = max(0, round(cx) - radius_x)
-    x1 = min(width, round(cx) + radius_x)
-    y0 = max(canvas_top, int(text_anchor["roi_top_y"]))
-    y1 = min(canvas_bottom, round(cy) + radius_below)
+    # S/G and A use the same small, vehicle-centred search area.
+    # C/W/P keep the previous wide status-text-anchored area.
+    rule = blue_palette()["stop_roi"]
+    canvas_w, canvas_h = right - left, bottom - top
+    half_x = max(int(rule["min_half_width_px"]),
+                 round(canvas_w * float(rule["half_width_fraction"])))
+    above = max(int(rule["min_above_px"]),
+                round(canvas_h * float(rule["above_position_fraction"])))
+    below = max(int(rule["min_below_px"]),
+                round(canvas_h * float(rule["below_position_fraction"])))
+    x0, x1 = max(left, round(cx) - half_x), min(right, round(cx) + half_x)
+    y0, y1 = max(top, round(cy) - above), min(bottom, round(cy) + below)
     if x1 <= x0 or y1 <= y0:
         return {
-            **unknown("HDL View 글자 아래의 유효한 도면 분석 영역이 없습니다."),
-            "roi": None,
-            "roi_rules": {
-                "positioning": "hdl_view_text_bottom",
-                "anchor_status": "invalid_roi",
-                "text_anchor": text_anchor,
-            },
+            **unknown("현재 위치 기준 STOP ROI가 유효하지 않습니다."),
+            "roi": None, "context_roi": None,
         }
+
+    text_anchor = detect_hdl_view_text_bottom(
+        image, [left, top, right, bottom],
+    )
+    context_roi = None
+    if text_anchor["status"] == "found":
+        wide_half = max(55, round(width * .31))
+        wide_below = max(55, round(height * .44))
+        lx0 = max(left, round(cx) - wide_half)
+        lx1 = min(right, round(cx) + wide_half)
+        ly0 = max(top, int(text_anchor["roi_top_y"]))
+        ly1 = min(bottom, round(cy) + wide_below)
+        if lx1 > lx0 and ly1 > ly0:
+            context_roi = [lx0, ly0, lx1, ly1]
+
     roi = image[y0:y1, x0:x1]
 
     # RGB(0,255,255) is the dedicated stop-line colour; reject the other
@@ -166,19 +178,26 @@ def local_stop_line_candidates(
     return {
         "value": None,
         "confidence": None,
-        "method": "red_marker_local_cyan_lines_v3_grouped_wide_roi",
+        "method": "red_marker_local_cyan_lines_v4_vehicle_roi",
         "reason": ("빨간 기준점 주변의 시안색 선 후보입니다. 정지선/도로 경계의 구별은 수동 검증이 필요합니다."
                    if lines else "빨간 기준점 주변에서 시안색 선 후보를 찾지 못했습니다. 정지선 없음으로 확정하지 않습니다."),
         "roi": [x0, y0, x1, y1],
+        "context_roi": context_roi,
+        "context_roi_rules": {
+            "positioning": "hdl_view_text_bottom",
+            "radius_x_fraction": .31,
+            "radius_below_fraction": .44,
+            "text_anchor": text_anchor,
+        },
         "palette_source": "color_ranges.json.blue_markings.colors.stop_line",
         "color_rgb": [0, 255, 255],
         "roi_rules": {
-            "radius_x_fraction": .31,
-            "radius_below_fraction": .44,
-            "minimum_radius_px": 55,
-            "red_line_detection": False,
-            "positioning": "hdl_view_text_bottom",
+            **dict(rule),
+            "positioning": "current_position_red_marker",
             "anchor_status": "found",
+            "position_point_px": [round(cx, 1), round(cy, 1)],
+            "canvas_bounds": [left, top, right, bottom],
+            "red_line_detection": False,
             "text_anchor": text_anchor,
         },
         "total_segments": total_segments,
@@ -201,13 +220,13 @@ def local_stop_line_candidates(
 def paint_stop_line_roi_border(overlay: np.ndarray, result: dict) -> None:
     """Draw the precise current-position stop-line search rectangle last.
 
-    Rendering after all S/G, C, A and W candidate annotations makes the
-    boundary visible even where roads or candidate labels cross the edge.
+    Rendering after all S/G and A candidate annotations keeps their shared
+    compact search boundary visible; C/W/P have a separate wide LINE ROI.
     This is a visual guide only; it never changes which pixels are analyzed.
     """
     bounds = result.get("roi")
     if not bounds or len(bounds) != 4:
-        return  # HDL View/marker not found: never invent a search boundary
+        return  # No vehicle ROI: never invent a search boundary
 
     height, width = overlay.shape[:2]
     x0, y0, x1, y1 = (int(v) for v in bounds)
@@ -247,3 +266,28 @@ def paint_stop_line_roi_border(overlay: np.ndarray, result: dict) -> None:
             overlay, label, (tx, ty),
             font, scale, (0, 165, 255), thickness, cv2.LINE_AA,
         )
+
+def paint_line_context_roi_border(overlay: np.ndarray, result: dict) -> None:
+    """Subtle border around the existing wide C/W/P search area."""
+    bounds = result.get("context_roi")
+    if bounds is None or len(bounds) != 4:
+        return
+    height, width = overlay.shape[:2]
+    x0, y0, x1, y1 = map(int, bounds)
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(width, x1), min(height, y1)
+    if x1 <= x0 or y1 <= y0:
+        return
+    gray = (125, 125, 125)
+    cv2.rectangle(overlay, (x0, y0), (x1 - 1, y1 - 1),
+                  gray, 1, cv2.LINE_AA)
+    label = "LINE ROI"
+    font, scale, thickness = cv2.FONT_HERSHEY_SIMPLEX, .50, 1
+    (tw, th), baseline = cv2.getTextSize(label, font, scale, thickness)
+    tx, ty = x0 + 8, y0 + th + 10
+    if tx + tw + 4 < x1 and ty + baseline + 4 < y1:
+        cv2.rectangle(overlay, (tx - 3, ty - th - 4),
+                      (tx + tw + 3, ty + baseline + 3),
+                      (18, 18, 18), -1)
+        cv2.putText(overlay, label, (tx, ty), font, scale,
+                    gray, thickness, cv2.LINE_AA)

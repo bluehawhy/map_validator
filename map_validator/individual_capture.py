@@ -16,6 +16,7 @@ import numpy as np
 
 from .analysis.input_tool.local_stop_line import (
     local_stop_line_candidates, paint_stop_line_roi_border,
+    paint_line_context_roi_border,
 )
 from .analysis.input_tool.local_center_line import local_center_line_candidates
 from .analysis.input_tool.local_guidance_line import (
@@ -211,7 +212,7 @@ def capture_and_analyze(
     )
     APP_LOG.info(
         "[개별촬영][HDL View기준] 상태=%s 글자하단=%s 분석상단=%s 근거=%s",
-        stop_line.get("roi_rules", {}).get("anchor_status", "미확인"),
+        stop_line.get("roi_rules", {}).get("text_anchor", {}).get("status", "미확인"),
         stop_line.get("roi_rules", {}).get("text_anchor", {}).get("text_bottom_y"),
         stop_line.get("roi_rules", {}).get("text_anchor", {}).get("roi_top_y"),
         stop_line.get("roi_rules", {}).get("text_anchor", {}).get("reason"),
@@ -231,8 +232,13 @@ def capture_and_analyze(
             group["group_id"], ",".join(group["member_ids"]),
             group["angle_deg"], group["length_px"], group["endpoints"],
         )
+    context_roi = stop_line.get("context_roi")
+    APP_LOG.info(
+        "[개별촬영][ROI 분리] STOP(S/G·A)=%s LINE(C·W·P)=%s",
+        stop_line.get("roi"), context_roi,
+    )
     center_line = local_center_line_candidates(
-        input_tool_image, point, overlay, roi=stop_line.get("roi"),
+        input_tool_image, point, overlay, roi=context_roi,
     )
     APP_LOG.info(
         "[개별촬영][중앙선] 노란조각=%s 포인트후보=%s 누락포인트=%s ROI=%s",
@@ -248,14 +254,14 @@ def capture_and_analyze(
         )
     # Preserve raw colour evidence before provisional object exclusions.
     raw_white = local_white_marking_candidates(
-        input_tool_image, point, np.zeros_like(overlay), roi=stop_line.get("roi"),
+        input_tool_image, point, np.zeros_like(overlay), roi=context_roi,
     )
     ui_text, text_white_exclusion = fixed_ui_text_exclusion(
         input_tool_image, marker.get("canvas_bounds"),
-        roi=stop_line.get("roi"),
+        roi=context_roi,
     )
     after_ui = local_white_marking_candidates(
-        input_tool_image, point, np.zeros_like(overlay), roi=stop_line.get("roi"),
+        input_tool_image, point, np.zeros_like(overlay), roi=context_roi,
         exclude_mask=text_white_exclusion,
         excluded_objects=["fixed_ui_status_text"],
     )
@@ -267,7 +273,7 @@ def capture_and_analyze(
     )
     paint_ui_text_exclusion(overlay, ui_text)
     white_markings = local_white_marking_candidates(
-        input_tool_image, point, overlay, roi=stop_line.get("roi"),
+        input_tool_image, point, overlay, roi=context_roi,
         exclude_mask=combined_exclusion,
         excluded_objects=["fixed_ui_status_text", "road_arrow_green_framed_region"],
     )
@@ -277,7 +283,7 @@ def capture_and_analyze(
         canvas_bounds=marker.get("canvas_bounds"),
     )
     approach_paths = local_approach_path_candidates(
-        input_tool_image, point, overlay, stop_roi=stop_line.get("roi"),
+        input_tool_image, point, overlay, stop_roi=context_roi,
     )
     APP_LOG.info(
         "[개별촬영][유도선] 연결그룹 U=%s 색상별=%s ROI=%s",
@@ -291,8 +297,8 @@ def capture_and_analyze(
         approach_paths.get("color_rgb"),
         approach_paths.get("roi"),
     )
-    # Show each reviewed region after all candidate overlays. C/A/W share
-    # STOP ROI; U and P have distinct vehicle-relative search rectangles.
+    # STOP(S/G+A) is compact; LINE(C/W/P) remains wide.
+    paint_line_context_roi_border(overlay, stop_line)
     paint_stop_line_roi_border(overlay, stop_line)
     paint_guidance_roi_border(overlay, guide_lines)
     paint_approach_roi_border(overlay, approach_paths)
@@ -410,7 +416,7 @@ def capture_and_analyze(
             "center_line_C": {
                 "roi": center_line.get("roi"),
                 "candidate_count": len(center_line.get("line_groups", [])),
-                "border": "STOP ROI (shared)",
+                "border": "LINE ROI (shared)",
             },
             "road_arrow_A": {
                 "roi": road_arrows.get("roi"),
@@ -420,7 +426,7 @@ def capture_and_analyze(
             "white_W": {
                 "roi": white_markings.get("roi"),
                 "candidate_count": len(white_markings.get("line_candidates", [])),
-                "border": "STOP ROI (shared)",
+                "border": "LINE ROI (shared)",
             },
             "guidance_U": {
                 "roi": guide_lines.get("roi"),

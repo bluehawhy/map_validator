@@ -180,6 +180,20 @@
       "min_below_px": 55,
       "top_inset_from_stop_roi_px": 6
     },
-    "notes": "유도선 RGB(0,128,255)와 진파랑 RGB(0,0,255)을 혼동하지 않는다. 색이 정확히 일치한 픽셀만 1차 검출. 글자/안티앨리어싱으로 인한 추가 색은 현장 검수 뒤 별도 보정."
+    "notes": "유도선 RGB(0,128,255)와 진파랑 RGB(0,0,255)을 혼동하지 않는다. 색이 정확히 일치한 픽셀만 1차 검출. 글자/안티앨리어싱으로 인한 추가 색은 현장 검수 뒤 별도 보정.",
+    "stop_roi": {
+      "half_width_fraction": 0.18,
+      "above_position_fraction": 0.25,
+      "below_position_fraction": 0.1,
+      "min_half_width_px": 55,
+      "min_above_px": 45,
+      "min_below_px": 35,
+      "anchor": "current_position_red_marker",
+      "used_by": [
+        "stop_line_S_G",
+        "road_arrow_A"
+      ],
+      "note": "차량 위치 기준. 중앙선·흰선·진입경로선은 기존 HDL View 기반 wide LINE ROI 유지"
+    }
   }
 }
