@@ -17,6 +17,9 @@ import numpy as np
 from .analysis.input_tool.local_stop_line import local_stop_line_candidates
 from .analysis.input_tool.local_center_line import local_center_line_candidates
 from .analysis.input_tool.local_white_marking import local_white_marking_candidates
+from .analysis.input_tool.local_road_arrow import (
+    local_road_arrow_candidates, paint_arrow_candidates,
+)
 from .analysis.input_tool.red_marker import find_red_marker
 from .individual_capture_index import list_individual_capture_files
 from .stage_types import validate_case_id
@@ -225,8 +228,24 @@ def capture_and_analyze(
             group["group_id"], group["point"], group["orientation"],
             ",".join(group["member_ids"]),
         )
+    # Preserve raw colour evidence before provisional object exclusions.
+    raw_white = local_white_marking_candidates(
+        input_tool_image, point, np.zeros_like(overlay), roi=stop_line.get("roi"),
+    )
+    road_arrows, arrow_white_exclusion = local_road_arrow_candidates(
+        input_tool_image, point, roi=stop_line.get("roi"),
+    )
     white_markings = local_white_marking_candidates(
         input_tool_image, point, overlay, roi=stop_line.get("roi"),
+        exclude_mask=arrow_white_exclusion,
+    )
+    paint_arrow_candidates(overlay, road_arrows)
+    APP_LOG.info(
+        "[개별촬영][화살표] A후보=%s 흰색제외픽셀=%s 원시W=%s 제외후W=%s",
+        road_arrows.get("candidate_count", 0),
+        road_arrows.get("excluded_white_pixels", 0),
+        raw_white.get("total_segments", 0),
+        white_markings.get("total_segments", 0),
     )
     APP_LOG.info(
         "[개별촬영][흰색원시후보] W조각=%s 표시=%s 생략=%s ROI=%s 분류=%s",
@@ -311,11 +330,13 @@ def capture_and_analyze(
             "road_id": None, "angle_deg": None, "heading_deg": None,
         },
         "checks": {"stop_line": stop_line, "center_line": center_line,
+                   "road_arrows": road_arrows,
+                   "white_marking_candidates_raw": raw_white,
                    "white_marking_candidates": white_markings},
         "human_review": "requires_human_review",
         "warning": (
             "빨간 표시는 현재 사용자 위치의 화면 좌표 후보입니다. 실제 지도 좌표·진행 방향은 "
-            "추정하지 않습니다. 정지선·노란 중앙선·흰색 표시 후보도 사람 검수가 필요합니다."
+            "추정하지 않습니다. 정지선·중앙선·노면화살표 A 및 흰색 W 후보는 사람 검수가 필요합니다."
         ),
     }
     history_path = folder / f"individual_analysis_r{revision:03d}.json"

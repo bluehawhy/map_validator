@@ -10,6 +10,7 @@ import numpy as np
 
 from ..findings import unknown
 from ..line_grouping import group_line_segments
+from .color_config import hsv_mask
 
 
 def local_center_line_candidates(
@@ -44,8 +45,7 @@ def _detect_axis_line_candidates(
     hsv = cv2.cvtColor(image[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
     # Same geometry for both classes; only HSV mask and marker style differ.
     # Bright low-saturation white may include text or other road symbols.
-    mask = (cv2.inRange(hsv, (0, 0, 185), (179, 65, 255)) if lane else
-            cv2.inRange(hsv, (18, 125, 135), (38, 255, 255)))
+    mask = hsv_mask(hsv, "white" if lane else "yellow")
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
     minimum = max(14, round(min(width, height) * .042))
     hough = cv2.HoughLinesP(

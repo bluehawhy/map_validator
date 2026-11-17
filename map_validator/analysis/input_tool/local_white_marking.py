@@ -10,11 +10,12 @@ import cv2
 import numpy as np
 
 from ..findings import unknown
+from .color_config import hsv_mask
 
 
 def local_white_marking_candidates(
     image: np.ndarray, point: list[float] | None, overlay: np.ndarray,
-    *, roi: list[int] | None,
+    *, roi: list[int] | None, exclude_mask: np.ndarray | None = None,
 ) -> dict:
     if point is None or roi is None:
         return {
@@ -37,8 +38,17 @@ def local_white_marking_candidates(
     # White is a *colour candidate*, not yet a lane marking. Text, symbols,
     # arrows, and other white objects are deliberately retained for review.
     hsv = cv2.cvtColor(image[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, (0, 0, 185), (179, 65, 255))
+    mask = hsv_mask(hsv, "white")
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
+    excluded_pixels = 0
+    if exclude_mask is not None:
+        if exclude_mask.shape != image.shape[:2] or exclude_mask.dtype != np.uint8:
+            raise ValueError("제외 마스크는 원본 이미지 크기의 uint8 배열이어야 합니다.")
+        local_exclusion = exclude_mask[y0:y1, x0:x1]
+        excluded_pixels = cv2.countNonZero(
+            cv2.bitwise_and(mask, local_exclusion)
+        )
+        mask = cv2.bitwise_and(mask, cv2.bitwise_not(local_exclusion))
     min_length = 8
     max_hough_gap = 4
     found = cv2.HoughLinesP(
@@ -104,7 +114,9 @@ def local_white_marking_candidates(
         "line_groups": [],
         "group_count": 0,
         "grouping_complete": False,
-        "excluded_objects": [],
+        "excluded_objects": (["road_arrow_white_pixels"] if exclude_mask is not None else []),
+        "excluded_white_pixels": excluded_pixels,
+        "palette_source": "color_ranges.json",
         "detection_rules": {
             "hsv_hue_range": [0, 179],
             "hsv_saturation_range": [0, 65],
@@ -115,6 +127,7 @@ def local_white_marking_candidates(
             "angle_restriction": None,
             "coverage_filter": None,
             "classification": "deferred",
-            "pixel_exclusion": "none",
+            "pixel_exclusion": ("road_arrow_white_pixels" if exclude_mask is not None
+                                else "none"),
         },
     }

@@ -978,6 +978,9 @@ class MainWindow(QMainWindow):
             stop = result.get("checks", {}).get("stop_line", {})
             center_line = result.get("checks", {}).get("center_line", {})
             center_points = center_line.get("line_groups", [])
+            arrow_candidates = result.get("checks", {}).get("road_arrows", {})
+            arrow_items = arrow_candidates.get("candidates", [])
+            original_white = result.get("checks", {}).get("white_marking_candidates_raw")
             white_raw = result.get("checks", {}).get("white_marking_candidates")
             lane_line = result.get("checks", {}).get("lane_line", {})
             lane_points = lane_line.get("line_groups", [])
@@ -1002,7 +1005,7 @@ class MainWindow(QMainWindow):
                 else f"표시된 선 그룹 {len(groups)}개 / {candidate_label} (일부만 그룹화)"
             )
             white_status = (
-                f"흰색 원시후보 W {white_raw.get('shown_segments', 0)}개 · 분류 보류"
+                f"화살표 A {len(arrow_items)}개 · 흰색 W {white_raw.get('shown_segments', 0)}개 · 분류 보류"
                 if white_raw is not None else
                 f"실선 L {len(lane_points)}개 · 점선 D {len(dashed_points)}개"
             )
@@ -1076,8 +1079,27 @@ class MainWindow(QMainWindow):
                 details.append(
                     f"※ 중앙선 포인트 {center_line['omitted_points']}개는 표시 상한으로 생략됨"
                 )
+            if road_arrows := (arrow_candidates if arrow_candidates else None):
+                details.append("── 노면화살표 검출 후보 (A · 검수 필요) ──")
+                details.append(
+                    f"화살표 후보 {road_arrows.get('candidate_count', 0)}개 · "
+                    f"제외된 내부 흰색 {road_arrows.get('excluded_white_pixels', 0)}px"
+                )
+                details.append(f"검출 결과: {road_arrows.get('reason', '판단 보류')}")
+                for item in arrow_items:
+                    details.append(
+                        f"  {item['candidate_id']}: 중심 {item['point']}px · "
+                        f"회전 {item['angle_deg']:.1f}° · 외곽 {item['polygon']} · "
+                        f"회색 {item['gray_pixels']}px / 초록 테두리 "
+                        f"{item['green_edge_pixels']}px / 흰색 {item['white_pixels']}px"
+                    )
             if white_raw is not None:
-                details.append("── 흰색 원시 검출 후보 (W · 미분류) ──")
+                details.append("── 흰색 선 조각 W (화살표 후보 제외 후 · 미분류) ──")
+                if original_white is not None:
+                    details.append(
+                        f"제외 전 원시 흰색 조각: {original_white.get('total_segments', 0)}개 · "
+                        f"제외 후: {white_raw.get('total_segments', 0)}개"
+                    )
                 details.append(f"흰색 검출: {white_raw.get('reason', '판단 보류')}")
                 details.append(
                     f"원시 선 조각 {white_raw.get('shown_segments', 0)}/"
@@ -1141,7 +1163,7 @@ class MainWindow(QMainWindow):
                     )
             details.extend([
                 "※ 선 후보는 정지선 확정이 아닙니다. 횡단보도/도로 경계를 구별하세요.",
-                "※ 흰색 W는 색상 기반 원시 후보입니다. 실선·점선·기타 오브젝트 분류 및 차로 수는 미확정입니다.",
+                "※ A는 회색/초록/흰색으로 검출한 화살표 후보이며, 제외 전 W는 JSON에 보존합니다. 최종 판정은 수동입니다.",
                 "※ 노란 선/포인트는 중앙선 검수용 후보이며 실제 중앙선 2개·4개를 확정하지 않습니다.",
                 f"원본: {result['input_tool_image']}",
                 f"근거: {result['input_tool_overlay']}",

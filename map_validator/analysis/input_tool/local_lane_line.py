@@ -11,6 +11,7 @@ import numpy as np
 
 from ..findings import unknown
 from ..line_grouping import group_line_segments
+from .color_config import hsv_mask
 
 
 def _visible_runs(
@@ -128,7 +129,7 @@ def local_lane_line_candidates(
                 "dashed_line": dict(missing)}
     region = [x0, y0, x1, y1]
     hsv = cv2.cvtColor(image[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
-    white = cv2.inRange(hsv, (0, 0, 185), (179, 65, 255))
+    white = hsv_mask(hsv, "white")
     white = cv2.morphologyEx(white, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
 
     min_solid_span = 20
