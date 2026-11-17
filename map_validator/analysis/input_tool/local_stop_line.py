@@ -10,32 +10,52 @@ import numpy as np
 
 from ..findings import unknown
 from ..line_grouping import group_line_segments
+from .local_ui_text import detect_hdl_view_text_bottom
 
 
 def local_stop_line_candidates(
     image: np.ndarray, point: list[float] | None, overlay: np.ndarray,
+    *, canvas_bounds: list[int] | None = None,
 ) -> dict:
     if point is None:
         return unknown("빨간 기준점이 확정되지 않아 주변 정지선을 분석하지 않았습니다.")
 
     height, width = image.shape[:2]
     cx, cy = point
-    # Field-tuned ROI: keep the upper edge below the red transverse line in
-    # the reference view, avoiding the fixed Zoom/Dist/HDL View text overlays.
-    # The inspector frames shots manually; this is *not* red-line tracking.
-    # All S/G, C, A and W candidates share this narrower ROI.
+    text_anchor = detect_hdl_view_text_bottom(image, canvas_bounds)
+    if text_anchor["status"] != "found":
+        return {
+            **unknown(
+                "HDL View 글자 하단을 확인하지 못해 선형 분석을 보류했습니다: "
+                + text_anchor["reason"]
+            ),
+            "roi": None,
+            "roi_rules": {
+                "positioning": "hdl_view_text_bottom",
+                "anchor_status": "not_found",
+                "text_anchor": text_anchor,
+            },
+        }
+
+    # All four line/object detectors share this ROI. Its top tracks the
+    # actual status-text row; no fixed percentage or guessed fallback is used.
     radius_x = max(55, round(width * .31))
-    radius_above = max(55, round(height * .16))
     radius_below = max(55, round(height * .44))
-    # Ignore the HD_3D Tool toolbar (top) and status strip (bottom).
-    map_top = round(height * .14)
-    map_bottom = min(height, round(height * .976))
+    _, canvas_top, _, canvas_bottom = map(int, canvas_bounds)
     x0 = max(0, round(cx) - radius_x)
     x1 = min(width, round(cx) + radius_x)
-    y0 = max(map_top, round(cy) - radius_above)
-    y1 = min(map_bottom, round(cy) + radius_below)
+    y0 = max(canvas_top, int(text_anchor["roi_top_y"]))
+    y1 = min(canvas_bottom, round(cy) + radius_below)
     if x1 <= x0 or y1 <= y0:
-        return unknown("현재 위치의 확장 도면 분석 범위가 유효하지 않습니다.")
+        return {
+            **unknown("HDL View 글자 아래의 유효한 도면 분석 영역이 없습니다."),
+            "roi": None,
+            "roi_rules": {
+                "positioning": "hdl_view_text_bottom",
+                "anchor_status": "invalid_roi",
+                "text_anchor": text_anchor,
+            },
+        }
     roi = image[y0:y1, x0:x1]
     cv2.rectangle(overlay, (x0, y0), (x1 - 1, y1 - 1), (0, 145, 255), 2)
 
@@ -144,13 +164,12 @@ def local_stop_line_candidates(
         "roi": [x0, y0, x1, y1],
         "roi_rules": {
             "radius_x_fraction": .31,
-            "radius_above_fraction": .16,
             "radius_below_fraction": .44,
             "minimum_radius_px": 55,
-            "map_top_fraction": .14,
-            "map_bottom_fraction": .976,
             "red_line_detection": False,
-            "positioning": "manual_capture_reference",
+            "positioning": "hdl_view_text_bottom",
+            "anchor_status": "found",
+            "text_anchor": text_anchor,
         },
         "total_segments": total_segments,
         "shown_segments": len(lines),

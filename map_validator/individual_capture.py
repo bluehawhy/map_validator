@@ -200,7 +200,16 @@ def capture_and_analyze(
             overlay, "CURRENT POSITION?", (min(px + 18, input_tool_image.shape[1] - 180), max(py - 14, 20)),
             cv2.FONT_HERSHEY_SIMPLEX, .5, (0, 255, 255), 1, cv2.LINE_AA,
         )
-    stop_line = local_stop_line_candidates(input_tool_image, point, overlay)
+    stop_line = local_stop_line_candidates(
+        input_tool_image, point, overlay, canvas_bounds=marker.get("canvas_bounds"),
+    )
+    APP_LOG.info(
+        "[개별촬영][HDL View기준] 상태=%s 글자하단=%s 분석상단=%s 근거=%s",
+        stop_line.get("roi_rules", {}).get("anchor_status", "미확인"),
+        stop_line.get("roi_rules", {}).get("text_anchor", {}).get("text_bottom_y"),
+        stop_line.get("roi_rules", {}).get("text_anchor", {}).get("roi_top_y"),
+        stop_line.get("roi_rules", {}).get("text_anchor", {}).get("reason"),
+    )
     APP_LOG.info(
         "[개별촬영][위치진단] 주변정지선분석=%s 분석ROI=%s "
         "시안색선조각=%d 선그룹후보=%d 총검출=%s 그룹화완료=%s",
