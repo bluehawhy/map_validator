@@ -75,3 +75,11 @@
 - **검수 위치 영역과 후보:** `STOP ROI`(주황)은 S/G·C·A·W 공유, `GUIDE ROI`(자주)는 U 후보, `PATH ROI`(연한 파랑)는 P 후보 전용이다. U와 P ROI는 차량 현재 위치를 기준으로 별도 계산하며 **HDL View 글자 하단 이하의 유효한 도면 분석 범위**를 넘지 않는다. ROI 3종 테두리와 번호별 후보점을 근거 이미지에 마지막으로 표시한다. `review_regions` JSON에는 각 오브젝트의 검사 ROI와 후보 수를 기록한다.
 - S는 Hough 선분 중점, G는 그룹 중점, C/A/W 기존 포인트, U/P는 연결 집합 대표점과 외곽 박스가 결과에 포함된다. `checks.approach_paths`와 `checks.guidance_lines`는 색상·연결·ROI·좌표·픽셀 수를 저장하며 이전 개별 촬영 JSON은 UI에서 선택적으로 읽는다.
 - 현장 검증 전에는 RGB 정확값 외곽의 안티앨리어싱 픽셀 누락·교차로 외곽선과 겹친 가는 선 손실 가능성이 있다. 사람 검수 이후 허용 오차나 연결 조건을 조정해야 한다. Windows 실행 테스트·테스트 코드는 별도 요청이 없어 수행하지 않았다.
+
+## 2026-11-17 GUIDE/STOP/PATH ROI 위치 재설정 · LINE ROI 제거
+
+- GUIDE ROI: 빨간 현재 위치 위쪽 교차로를 탐색하되, **차량 앞쪽 가장 가까운 시안색 정지선 후보 선분 위치까지 하단을 내린다**(4px 여유). 선분이 발견되지 않으면 현재 위치를 임시 기준으로 사용하고 `stop_line_reference.status`에서 `cyan_segment_candidate`와 `vehicle_position_fallback`을 구분한다. 시안색 후보는 실제 정지선으로 자동 확정하지 않는다.
+- STOP ROI: **GUIDE ROI의 상단부터 전체 높이 70% 지점**까지 상단을 올리고, 하단은 현재 위치 아래 기존 10%를 유지한다. 정지선 S/G와 화살표 A는 같은 STOP ROI를 공유한다.
+- PATH ROI: 현재 위치 빨간 마커를 아래쪽 기준점으로 삼아 **도면 높이 45% 위쪽**을 탐색한다. 마커 아래로는 4px 여유만 두며 도면 경계 밖으로 확장하지 않는다.
+- **LINE ROI 삭제:** 회색 사각형과 'LINE ROI' 라벨, 별도의 context_roi 결과 및 UI 안내를 제거한다. 중앙선 C와 흰선 W는 세 ROI를 포함하는 내부 직사각형 탐색 범위(`candidate_search_bounds`)에서 계속 검출하되 **네 번째 테두리를 그리지 않는다**. C/W의 `review_regions.border`는 `none`이다.
+- `blue_markings.guidance_roi/stop_roi/approach_roi` 수치를 갱신했고 ROI 3종(자주/주황/연파랑)은 유지한다. 기존 WGC 원본·검수 이력 보존. Windows 실환경 및 자동 테스트는 요청받지 않아 실행하지 않았다.

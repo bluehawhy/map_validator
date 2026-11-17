@@ -163,37 +163,32 @@
     "guidance_roi": {
       "half_width_fraction": 0.18,
       "above_position_fraction": 0.65,
-      "below_position_fraction": 0.04,
       "min_half_width_px": 55,
       "min_above_px": 45,
-      "min_below_px": 16,
-      "anchor": "current_position_red_marker",
-      "vertical_limit": "black_canvas_top_to_current_position_plus_below",
-      "note": "차량(빨간 사각형) 중심의 좌우 좁은 폭, 차량보다 위를 주로 탐색. 지도 도면 canvas_bounds 기준으로 클립하며 STOP ROI/HDL View 글자 하단에는 종속되지 않음."
+      "stop_line_margin_px": 4,
+      "anchor": "cyan_stop_line_candidate_or_vehicle_fallback"
     },
     "approach_roi": {
       "half_width_fraction": 0.3,
-      "above_position_fraction": 0.2,
-      "below_position_fraction": 0.44,
+      "above_position_fraction": 0.45,
+      "below_position_fraction": 0,
       "min_half_width_px": 55,
       "min_above_px": 40,
-      "min_below_px": 55,
-      "top_inset_from_stop_roi_px": 6
+      "min_below_px": 4,
+      "anchor": "vehicle_position_as_bottom_edge"
     },
     "notes": "유도선 RGB(0,128,255)와 진파랑 RGB(0,0,255)을 혼동하지 않는다. 색이 정확히 일치한 픽셀만 1차 검출. 글자/안티앨리어싱으로 인한 추가 색은 현장 검수 뒤 별도 보정.",
     "stop_roi": {
       "half_width_fraction": 0.18,
-      "above_position_fraction": 0.25,
       "below_position_fraction": 0.1,
       "min_half_width_px": 55,
-      "min_above_px": 45,
       "min_below_px": 35,
-      "anchor": "current_position_red_marker",
+      "guide_height_fraction": 0.7,
+      "anchor": "guide_roi_70_percent",
       "used_by": [
         "stop_line_S_G",
         "road_arrow_A"
-      ],
-      "note": "차량 위치 기준. 중앙선·흰선·진입경로선은 기존 HDL View 기반 wide LINE ROI 유지"
+      ]
     }
   }
 }

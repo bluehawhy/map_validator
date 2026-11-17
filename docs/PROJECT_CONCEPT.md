@@ -199,3 +199,11 @@
 - 이전 넓은 검출 영역(HDL View/Input 글자 하단+10px 상단, 좌우 이미지 너비 31%, 현재위치 아래 이미지 높이 44%)은 `checks.stop_line.context_roi`로 분리했다. **중앙선 C, 흰선 W, 진입 경로선 P**는 이 넓은 영역을 계속 사용한다. GUIDE ROI(U)는 독립적으로 위쪽 탐색을 계속한다. 텍스트 기준이 확인되지 않으면 LINE 및 P 분석만 보류하고, STOP·A는 빨간 차량 위치가 검출되면 수행한다.
 - 근거 이미지에 작은 주황색 `STOP ROI`(S/G·A)와 옅은 회색 `LINE ROI`(C/W/P) 테두리를 각각 표시한다. `review_regions`도 실제 분석 범위와 일치시킨다. 기존 WGC 원본·촬영 이력은 보존하고 새 분석 결과만 갱신한다.
 - **현장 미검증:** 차량 위치가 교차로에 가까운 정도에 따라 STOP/A 후보가 작은 범위에서 누락될 수 있다. Windows 현장 분석과 자동 테스트는 요청받지 않아 실행하지 않았다.
+
+## 2026-11-17 GUIDE/STOP/PATH ROI 위치 재설정 · LINE ROI 제거
+
+- GUIDE ROI: 빨간 현재 위치 위쪽 교차로를 탐색하되, **차량 앞쪽 가장 가까운 시안색 정지선 후보 선분 위치까지 하단을 내린다**(4px 여유). 선분이 발견되지 않으면 현재 위치를 임시 기준으로 사용하고 `stop_line_reference.status`에서 `cyan_segment_candidate`와 `vehicle_position_fallback`을 구분한다. 시안색 후보는 실제 정지선으로 자동 확정하지 않는다.
+- STOP ROI: **GUIDE ROI의 상단부터 전체 높이 70% 지점**까지 상단을 올리고, 하단은 현재 위치 아래 기존 10%를 유지한다. 정지선 S/G와 화살표 A는 같은 STOP ROI를 공유한다.
+- PATH ROI: 현재 위치 빨간 마커를 아래쪽 기준점으로 삼아 **도면 높이 45% 위쪽**을 탐색한다. 마커 아래로는 4px 여유만 두며 도면 경계 밖으로 확장하지 않는다.
+- **LINE ROI 삭제:** 회색 사각형과 'LINE ROI' 라벨, 별도의 context_roi 결과 및 UI 안내를 제거한다. 중앙선 C와 흰선 W는 세 ROI를 포함하는 내부 직사각형 탐색 범위(`candidate_search_bounds`)에서 계속 검출하되 **네 번째 테두리를 그리지 않는다**. C/W의 `review_regions.border`는 `none`이다.
+- `blue_markings.guidance_roi/stop_roi/approach_roi` 수치를 갱신했고 ROI 3종(자주/주황/연파랑)은 유지한다. 기존 WGC 원본·검수 이력 보존. Windows 실환경 및 자동 테스트는 요청받지 않아 실행하지 않았다.

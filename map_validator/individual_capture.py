@@ -16,7 +16,7 @@ import numpy as np
 
 from .analysis.input_tool.local_stop_line import (
     local_stop_line_candidates, paint_stop_line_roi_border,
-    paint_line_context_roi_border,
+    detect_stop_line_reference,
 )
 from .analysis.input_tool.local_center_line import local_center_line_candidates
 from .analysis.input_tool.local_guidance_line import (
@@ -207,101 +207,75 @@ def capture_and_analyze(
             overlay, "CURRENT POSITION?", (min(px + 18, input_tool_image.shape[1] - 180), max(py - 14, 20)),
             cv2.FONT_HERSHEY_SIMPLEX, .5, (0, 255, 255), 1, cv2.LINE_AA,
         )
-    stop_line = local_stop_line_candidates(
-        input_tool_image, point, overlay, canvas_bounds=marker.get("canvas_bounds"),
-    )
-    APP_LOG.info(
-        "[개별촬영][HDL View기준] 상태=%s 글자하단=%s 분석상단=%s 근거=%s",
-        stop_line.get("roi_rules", {}).get("text_anchor", {}).get("status", "미확인"),
-        stop_line.get("roi_rules", {}).get("text_anchor", {}).get("text_bottom_y"),
-        stop_line.get("roi_rules", {}).get("text_anchor", {}).get("roi_top_y"),
-        stop_line.get("roi_rules", {}).get("text_anchor", {}).get("reason"),
-    )
-    APP_LOG.info(
-        "[개별촬영][위치진단] 주변정지선분석=%s 분석ROI=%s "
-        "시안색선조각=%d 선그룹후보=%d 총검출=%s 그룹화완료=%s",
-        "진행" if point is not None else "건너뜀(위치미확인)",
-        stop_line.get("roi"), len(stop_line.get("line_candidates", [])),
-        len(stop_line.get("line_groups", [])),
-        stop_line.get("total_segments", 0),
-        stop_line.get("grouping_complete", False),
-    )
-    for group in stop_line.get("line_groups", []):
-        APP_LOG.info(
-            "[개별촬영][선그룹] %s 구성=%s 방향=%s 길이=%spx 좌표=%s",
-            group["group_id"], ",".join(group["member_ids"]),
-            group["angle_deg"], group["length_px"], group["endpoints"],
-        )
-    context_roi = stop_line.get("context_roi")
-    APP_LOG.info(
-        "[개별촬영][ROI 분리] STOP(S/G·A)=%s LINE(C·W·P)=%s",
-        stop_line.get("roi"), context_roi,
-    )
-    center_line = local_center_line_candidates(
-        input_tool_image, point, overlay, roi=context_roi,
-    )
-    APP_LOG.info(
-        "[개별촬영][중앙선] 노란조각=%s 포인트후보=%s 누락포인트=%s ROI=%s",
-        center_line.get("total_segments", 0),
-        center_line.get("shown_points", 0),
-        center_line.get("omitted_points", 0), center_line.get("roi"),
-    )
-    for group in center_line.get("line_groups", []):
-        APP_LOG.info(
-            "[개별촬영][중앙선] %s 좌표=%s 방향=%s 구성=%s",
-            group["group_id"], group["point"], group["orientation"],
-            ",".join(group["member_ids"]),
-        )
-    # Preserve raw colour evidence before provisional object exclusions.
-    raw_white = local_white_marking_candidates(
-        input_tool_image, point, np.zeros_like(overlay), roi=context_roi,
-    )
-    ui_text, text_white_exclusion = fixed_ui_text_exclusion(
-        input_tool_image, marker.get("canvas_bounds"),
-        roi=context_roi,
-    )
-    after_ui = local_white_marking_candidates(
-        input_tool_image, point, np.zeros_like(overlay), roi=context_roi,
-        exclude_mask=text_white_exclusion,
-        excluded_objects=["fixed_ui_status_text"],
-    )
-    road_arrows, arrow_region_exclusion = local_road_arrow_candidates(
-        input_tool_image, point, roi=stop_line.get("roi"),
-    )
-    combined_exclusion = cv2.bitwise_or(
-        text_white_exclusion, arrow_region_exclusion,
-    )
-    paint_ui_text_exclusion(overlay, ui_text)
-    white_markings = local_white_marking_candidates(
-        input_tool_image, point, overlay, roi=context_roi,
-        exclude_mask=combined_exclusion,
-        excluded_objects=["fixed_ui_status_text", "road_arrow_green_framed_region"],
-    )
-    paint_arrow_candidates(overlay, road_arrows)
+    bounds = marker.get("canvas_bounds")
+    reference = detect_stop_line_reference(input_tool_image,point,bounds)
     guide_lines = local_guidance_line_candidates(
-        input_tool_image, point, overlay,
-        canvas_bounds=marker.get("canvas_bounds"),
+        input_tool_image,point,overlay,canvas_bounds=bounds,
+        stop_line_y=reference.get("y"),stop_reference=reference,
+    )
+    stop_line = local_stop_line_candidates(
+        input_tool_image,point,overlay,canvas_bounds=bounds,
+        guide_roi=guide_lines.get("roi"),stop_reference=reference,
     )
     approach_paths = local_approach_path_candidates(
-        input_tool_image, point, overlay, stop_roi=context_roi,
+        input_tool_image,point,overlay,canvas_bounds=bounds,
+    )
+    available = [x["roi"] for x in (guide_lines,stop_line,approach_paths)
+                 if x.get("roi") is not None]
+    scan_bounds = ([min(x[0] for x in available),
+                    min(x[1] for x in available),
+                    max(x[2] for x in available),
+                    max(x[3] for x in available)]
+                   if available else None)
+    APP_LOG.info(
+        "[개별촬영][ROI] 정지선참조=%s GUIDE=%s STOP=%s PATH=%s C/W내부=%s",
+        reference.get("status"),guide_lines.get("roi"),stop_line.get("roi"),
+        approach_paths.get("roi"),scan_bounds,
+    )
+    for group in stop_line.get("line_groups",[]):
+        APP_LOG.info(
+            "[개별촬영][선그룹] %s 구성=%s 방향=%s 좌표=%s",
+            group["group_id"],",".join(group["member_ids"]),
+            group["angle_deg"],group["endpoints"],
+        )
+    center_line = local_center_line_candidates(
+        input_tool_image,point,overlay,roi=scan_bounds,
+    )
+    raw_white = local_white_marking_candidates(
+        input_tool_image,point,np.zeros_like(overlay),roi=scan_bounds,
+    )
+    ui_text,text_white_exclusion = fixed_ui_text_exclusion(
+        input_tool_image,bounds,roi=scan_bounds,
+    )
+    after_ui = local_white_marking_candidates(
+        input_tool_image,point,np.zeros_like(overlay),roi=scan_bounds,
+        exclude_mask=text_white_exclusion,excluded_objects=["fixed_ui_status_text"],
+    )
+    road_arrows,arrow_region_exclusion = local_road_arrow_candidates(
+        input_tool_image,point,roi=stop_line.get("roi"),
+    )
+    combined_exclusion = cv2.bitwise_or(
+        text_white_exclusion,arrow_region_exclusion,
+    )
+    paint_ui_text_exclusion(overlay,ui_text)
+    white_markings = local_white_marking_candidates(
+        input_tool_image,point,overlay,roi=scan_bounds,
+        exclude_mask=combined_exclusion,
+        excluded_objects=["fixed_ui_status_text","road_arrow_green_framed_region"],
+    )
+    paint_arrow_candidates(overlay,road_arrows)
+    paint_stop_line_roi_border(overlay,stop_line)
+    paint_guidance_roi_border(overlay,guide_lines)
+    paint_approach_roi_border(overlay,approach_paths)
+    APP_LOG.info(
+        "[개별촬영][중앙선] 노란조각=%s 포인트후보=%s ROI=%s",
+        center_line.get("total_segments",0),
+        center_line.get("shown_points",0),center_line.get("roi"),
     )
     APP_LOG.info(
-        "[개별촬영][유도선] 연결그룹 U=%s 색상별=%s ROI=%s",
-        guide_lines.get("group_count", 0),
-        guide_lines.get("color_counts", {}),
-        guide_lines.get("roi"),
+        "[개별촬영][유도선/경로] U=%s P=%s",
+        guide_lines.get("group_count",0),approach_paths.get("group_count",0),
     )
-    APP_LOG.info(
-        "[개별촬영][진입경로] P후보=%s RGB=%s ROI=%s",
-        approach_paths.get("group_count", 0),
-        approach_paths.get("color_rgb"),
-        approach_paths.get("roi"),
-    )
-    # STOP(S/G+A) is compact; LINE(C/W/P) remains wide.
-    paint_line_context_roi_border(overlay, stop_line)
-    paint_stop_line_roi_border(overlay, stop_line)
-    paint_guidance_roi_border(overlay, guide_lines)
-    paint_approach_roi_border(overlay, approach_paths)
     APP_LOG.info(
         "[개별촬영][UI문자] 제외영역=%s 흰색제외픽셀=%s 원본W=%s 문자제외후W=%s",
         [r.get("bbox") for r in ui_text.get("regions", [])],
@@ -338,7 +312,7 @@ def capture_and_analyze(
 
     # A magnified ROI preview lets the inspector identify S1..SN in the UI,
     # while the original and full-size overlay remain immutable.
-    roi = stop_line.get("roi")
+    roi = scan_bounds
     if roi and len(roi) == 4:
         left, top, right, bottom = [int(value) for value in roi]
         padding = 20
@@ -399,6 +373,8 @@ def capture_and_analyze(
             "is_intersection_center": False,
             "road_id": None, "angle_deg": None, "heading_deg": None,
         },
+        "candidate_search_bounds": scan_bounds,
+        "stop_line_reference": reference,
         "checks": {"stop_line": stop_line, "center_line": center_line,
                    "guidance_lines": guide_lines,
                    "approach_paths": approach_paths,
@@ -416,7 +392,7 @@ def capture_and_analyze(
             "center_line_C": {
                 "roi": center_line.get("roi"),
                 "candidate_count": len(center_line.get("line_groups", [])),
-                "border": "LINE ROI (shared)",
+                "border": "none (internal combined search)",
             },
             "road_arrow_A": {
                 "roi": road_arrows.get("roi"),
@@ -426,7 +402,7 @@ def capture_and_analyze(
             "white_W": {
                 "roi": white_markings.get("roi"),
                 "candidate_count": len(white_markings.get("line_candidates", [])),
-                "border": "LINE ROI (shared)",
+                "border": "none (internal combined search)",
             },
             "guidance_U": {
                 "roi": guide_lines.get("roi"),

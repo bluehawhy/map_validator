@@ -22,38 +22,31 @@ def _unknown(reason: str, kind: str) -> dict:
     }
 
 
-def _vehicle_roi(
-    image: np.ndarray, point: list[float], stop_roi: list[int],
-    settings: dict,
-) -> list[int] | None:
-    height, width = image.shape[:2]
-    px, py = float(point[0]), float(point[1])
-    half = max(int(settings["min_half_width_px"]),
-               round(width * float(settings["half_width_fraction"])))
-    above = max(int(settings["min_above_px"]),
-                round(height * float(settings["above_position_fraction"])))
-    below = max(int(settings["min_below_px"]),
-                round(height * float(settings["below_position_fraction"])))
-    sx0, sy0, sx1, sy1 = map(int, stop_roi)
-    x0 = max(0, round(px) - half)
-    x1 = min(width, round(px) + half)
-    y0 = max(sy0 + int(settings["top_inset_from_stop_roi_px"]),
-             round(py) - above)
-    y1 = min(sy1, round(py) + below)
-    if x1 <= x0 or y1 <= y0:
+def _vehicle_roi(image: np.ndarray, point: list[float],
+                 canvas_bounds: list[int], settings: dict) -> list[int] | None:
+    """PATH ROI: from above the current marker, with marker at lower edge."""
+    h,w = image.shape[:2]
+    left,top,right,bottom = map(int,canvas_bounds)
+    left,top,right,bottom = max(0,left),max(0,top),min(w,right),min(h,bottom)
+    px,py = map(float,point)
+    if not (left <= px < right and top <= py < bottom):
         return None
-    return [x0, y0, x1, y1]
+    half = max(int(settings["min_half_width_px"]),
+               round((right-left)*float(settings["half_width_fraction"])))
+    above = max(int(settings["min_above_px"]),
+                round((bottom-top)*float(settings["above_position_fraction"])))
+    below = max(int(settings["min_below_px"]),
+                round((bottom-top)*float(settings["below_position_fraction"])))
+    x0,x1 = max(left,round(px)-half),min(right,round(px)+half)
+    y0,y1 = max(top,round(py)-above),min(bottom,round(py)+below)
+    return [x0,y0,x1,y1] if x1>x0 and y1>y0 else None
 
 
 def _guidance_roi(
     image: np.ndarray, point: list[float], canvas_bounds: list[int],
-    settings: dict,
+    settings: dict, stop_line_y: int | None = None,
 ) -> list[int] | None:
-    """Vehicle-centred, upward-looking guidance search, independent of STOP ROI.
-
-    The current-position red square is the bottom anchor; the search extends
-    toward the top of the real black map viewport (not the window toolbar).
-    """
+    """Vehicle-to-cyan-reference guide ROI (cyan is review candidate only)."""
     height, width = image.shape[:2]
     canvas_left, canvas_top, canvas_right, canvas_bottom = map(int, canvas_bounds)
     canvas_left = max(0, canvas_left)
@@ -77,14 +70,12 @@ def _guidance_roi(
         int(settings["min_above_px"]),
         round(viewport_height * float(settings["above_position_fraction"])),
     )
-    below = max(
-        int(settings["min_below_px"]),
-        round(viewport_height * float(settings["below_position_fraction"])),
-    )
+    margin = int(settings["stop_line_margin_px"])
     x0 = max(canvas_left, round(px) - half)
     x1 = min(canvas_right, round(px) + half)
     y0 = max(canvas_top, round(py) - above)
-    y1 = min(canvas_bottom, round(py) + below)
+    reference_y = int(stop_line_y) if stop_line_y is not None else round(py)
+    y1 = min(canvas_bottom, reference_y + margin)
     return [x0, y0, x1, y1] if x1 > x0 and y1 > y0 else None
 
 
@@ -114,27 +105,24 @@ def _paint_candidate(
 
 def _connected_groups(
     image: np.ndarray, point: list[float] | None,
-    overlay: np.ndarray, *, stop_roi: list[int] | None,
+    overlay: np.ndarray, *,
     canvas_bounds: list[int] | None = None,
+    stop_line_y: int | None = None,
+    stop_reference: dict | None = None,
     name: str, identifier: str, border_name: str,
 ) -> dict:
     if point is None:
-        return _unknown("빨간 현재 위치 표시점을 확인하지 못했습니다.", name)
+        return _unknown("현재 위치가 확인되지 않았습니다.", name)
     settings = blue_palette()
-    # U: upwards from the detected car, bounded by the black map viewport.
-    # P: existing below-car / HDL text search area, unchanged.
-    roi_keys = {"guidance": "guidance_roi", "approach_path": "approach_roi"}
+    roi_keys = {"guidance":"guidance_roi","approach_path":"approach_roi"}
     scope = settings[roi_keys[name]]
-    if name == "guidance":
-        if canvas_bounds is None or len(canvas_bounds) != 4:
-            return _unknown("GUIDE ROI 도면 경계를 확인하지 못했습니다.", name)
-        roi = _guidance_roi(image, point, canvas_bounds, scope)
-    else:
-        if stop_roi is None or len(stop_roi) != 4:
-            return _unknown("PATH ROI 기준 STOP ROI가 확인되지 않았습니다.", name)
-        roi = _vehicle_roi(image, point, stop_roi, scope)
+    if canvas_bounds is None or len(canvas_bounds) != 4:
+        return _unknown(f"{border_name} 도면 경계를 찾지 못했습니다.",name)
+    roi = (_guidance_roi(image,point,canvas_bounds,scope,stop_line_y)
+           if name=="guidance" else
+           _vehicle_roi(image,point,canvas_bounds,scope))
     if roi is None:
-        return _unknown("차량 기준 검출 범위가 유효하지 않습니다.", name)
+        return _unknown(f"{border_name} 범위가 유효하지 않습니다.",name)
 
     x0, y0, x1, y1 = roi
     source = image[y0:y1, x0:x1]
@@ -203,15 +191,13 @@ def _connected_groups(
         "roi_rules": {
             **dict(scope),
             "positioning": (
-                "vehicle_position_to_canvas_top"
+                "vehicle_to_cyan_stop_reference"
                 if name == "guidance"
-                else "vehicle_position_within_stop_roi"
+                else "vehicle_position_upward"
             ),
             "position_point_px": [round(float(point[0]), 1), round(float(point[1]), 1)],
-            "canvas_bounds": (
-                list(map(int, canvas_bounds))
-                if name == "guidance" and canvas_bounds is not None else None
-            ),
+            "canvas_bounds": list(map(int, canvas_bounds)),
+            "stop_line_reference": stop_reference if name=="guidance" else None,
         },
         "palette_source": "color_ranges.json.blue_markings",
         "color_rgb": list(settings["colors"][name]["rgb"]),
@@ -227,22 +213,24 @@ def _connected_groups(
 
 def local_guidance_line_candidates(
     image: np.ndarray, point: list[float] | None, overlay: np.ndarray,
-    *, stop_roi: list[int] | None = None,
-    canvas_bounds: list[int] | None = None,
+    *, canvas_bounds: list[int] | None = None,
+    stop_line_y: int | None = None,
+    stop_reference: dict | None = None,
 ) -> dict:
     return _connected_groups(
-        image, point, overlay, stop_roi=stop_roi, canvas_bounds=canvas_bounds,
-        name="guidance", identifier="U", border_name="GUIDE ROI",
+        image,point,overlay,canvas_bounds=canvas_bounds,
+        stop_line_y=stop_line_y,stop_reference=stop_reference,
+        name="guidance",identifier="U",border_name="GUIDE ROI",
     )
 
 
 def local_approach_path_candidates(
     image: np.ndarray, point: list[float] | None, overlay: np.ndarray,
-    *, stop_roi: list[int] | None,
+    *, canvas_bounds: list[int] | None = None,
 ) -> dict:
     return _connected_groups(
-        image, point, overlay, stop_roi=stop_roi,
-        name="approach_path", identifier="P", border_name="PATH ROI",
+        image,point,overlay,canvas_bounds=canvas_bounds,
+        name="approach_path",identifier="P",border_name="PATH ROI",
     )
 
 
