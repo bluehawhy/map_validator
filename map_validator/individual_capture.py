@@ -244,17 +244,17 @@ def capture_and_analyze(
         exclude_mask=text_white_exclusion,
         excluded_objects=["fixed_ui_status_text"],
     )
-    road_arrows, arrow_white_exclusion = local_road_arrow_candidates(
+    road_arrows, arrow_region_exclusion = local_road_arrow_candidates(
         input_tool_image, point, roi=stop_line.get("roi"),
     )
     combined_exclusion = cv2.bitwise_or(
-        text_white_exclusion, arrow_white_exclusion,
+        text_white_exclusion, arrow_region_exclusion,
     )
     paint_ui_text_exclusion(overlay, ui_text)
     white_markings = local_white_marking_candidates(
         input_tool_image, point, overlay, roi=stop_line.get("roi"),
         exclude_mask=combined_exclusion,
-        excluded_objects=["fixed_ui_status_text", "road_arrow_white_pixels"],
+        excluded_objects=["fixed_ui_status_text", "road_arrow_green_framed_region"],
     )
     paint_arrow_candidates(overlay, road_arrows)
     APP_LOG.info(
@@ -264,11 +264,13 @@ def capture_and_analyze(
         raw_white.get("total_segments", 0), after_ui.get("total_segments", 0),
     )
     APP_LOG.info(
-        "[개별촬영][화살표] A후보=%s 흰색제외픽셀=%s 문자제외후W=%s 최종W=%s",
+        "[개별촬영][화살표] A후보=%s 초록외곽기준영역=%spx 흰색제외=%spx 문자제외후W=%s 최종W=%s 겹친조각제외=%s",
         road_arrows.get("candidate_count", 0),
+        road_arrows.get("excluded_region_pixels", 0),
         road_arrows.get("excluded_white_pixels", 0),
         after_ui.get("total_segments", 0),
         white_markings.get("total_segments", 0),
+        white_markings.get("rejected_mask_overlap_segments", 0),
     )
     APP_LOG.info(
         "[개별촬영][흰색원시후보] W조각=%s 표시=%s 생략=%s ROI=%s 분류=%s",

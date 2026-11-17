@@ -1,9 +1,9 @@
 """Find review-only road-arrow objects: green rim, gray fill, white interior.
 
 Candidates are identified from the original WGC image. A# is a provisional
-object label, not a directional or semantic recognition result. Only white
-pixels within accepted candidate polygons are returned for a downstream
-search-mask exclusion. The source image and raw white detections are retained.
+object label, not a directional or semantic recognition result. The entire
+green-framed polygon and a small margin are excluded from later white-line
+detection; original pixels and raw white candidates remain unchanged.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _blank(reason: str, size: tuple[int, int]) -> tuple[dict, np.ndarray]:
         **unknown(reason), "method": "green_gray_white_arrow_candidate_v1",
         "classification_status": "not_analyzed",
         "candidates": [], "candidate_count": 0, "excluded_white_pixels": 0,
-        "exclusion_scope": "white_pixels_inside_arrow_polygons",
+        "excluded_region_pixels": 0, "exclusion_scope": "green_framed_object_region",
     }, np.zeros((h, w), dtype=np.uint8))
 
 
@@ -50,7 +50,11 @@ def local_road_arrow_candidates(
     contours, _ = cv2.findContours(gray, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     roi_height, roi_width = gray.shape
     candidate_area_limit = roi_height * roi_width * float(config["max_roi_area_fraction"])
-    white_exclusion_roi = np.zeros_like(gray)
+    arrow_exclusion_roi = np.zeros_like(gray)
+    border_margin = max(0, int(config.get("exclusion_margin_px", 3)))
+    exclusion_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE, (2 * border_margin + 1, 2 * border_margin + 1)
+    )
     accepted = []
     for contour in contours:
         contour_area = float(cv2.contourArea(contour))
@@ -98,8 +102,15 @@ def local_road_arrow_candidates(
         angle = float(np.degrees(np.arctan2(
             float(longest_edge[1]), float(longest_edge[0])
         )) % 180)
-        local_white = cv2.bitwise_and(white, polygon)
-        white_exclusion_roi = cv2.bitwise_or(white_exclusion_roi, local_white)
+        # The green border is the object boundary. Exclude every pixel
+        # enclosed by it plus a small margin, not only the white arrow glyph.
+        region_mask = (
+            cv2.dilate(polygon, exclusion_kernel)
+            if border_margin else polygon
+        )
+        arrow_exclusion_roi = cv2.bitwise_or(arrow_exclusion_roi, region_mask)
+        local_excluded_white = cv2.countNonZero(cv2.bitwise_and(white, region_mask))
+        mx, my, mw, mh = cv2.boundingRect(cv2.findNonZero(region_mask))
         global_box = [[int(x + x0), int(y + y0)] for x, y in box]
         xs, ys = [p[0] for p in global_box], [p[1] for p in global_box]
         accepted.append({
@@ -112,6 +123,10 @@ def local_road_arrow_candidates(
             "gray_fill_ratio": round(gray_pixels / area_pixels, 3),
             "gray_pixels": gray_pixels,
             "white_pixels": white_pixels,
+            "masked_white_pixels": int(local_excluded_white),
+            "masked_region_pixels": int(cv2.countNonZero(region_mask)),
+            "mask_bbox": [mx + x0, my + y0, mx + mw + x0, my + mh + y0],
+            "mask_margin_px": border_margin,
             "green_edge_pixels": green_pixels,
             "required_green_edge_pixels": required_green,
             "classification_status": "candidate_needs_review",
@@ -121,8 +136,11 @@ def local_road_arrow_candidates(
         candidate["candidate_id"] = f"A{index}"
 
     full_mask = np.zeros((height, width), dtype=np.uint8)
-    full_mask[y0:y1, x0:x1] = white_exclusion_roi
-    removed = cv2.countNonZero(white_exclusion_roi)
+    full_mask[y0:y1, x0:x1] = arrow_exclusion_roi
+    removed_area = int(cv2.countNonZero(arrow_exclusion_roi))
+    removed_white = int(cv2.countNonZero(
+        cv2.bitwise_and(white, arrow_exclusion_roi)
+    ))
     return ({
         "value": None, "confidence": None,
         "method": "green_gray_white_arrow_candidate_v1",
@@ -136,8 +154,10 @@ def local_road_arrow_candidates(
         "roi": [x0, y0, x1, y1],
         "classification_status": "candidate_needs_review",
         "candidates": accepted, "candidate_count": len(accepted),
-        "excluded_white_pixels": removed,
-        "exclusion_scope": "white_pixels_inside_arrow_polygons",
+        "excluded_white_pixels": removed_white,
+        "excluded_region_pixels": removed_area,
+        "exclusion_scope": "green_framed_object_region",
+        "mask_margin_px": border_margin,
         "palette_source": "color_ranges.json",
         "rules": {
             "min_gray_contour_area_px": config["min_gray_contour_area_px"],
@@ -149,6 +169,7 @@ def local_road_arrow_candidates(
             "min_white_pixels": config["min_white_pixels"],
             "min_green_edge_pixels": config["min_green_edge_pixels"],
             "min_green_border_fraction": config["min_green_border_fraction"],
+            "exclusion_margin_px": border_margin,
         },
     }, full_mask)
 

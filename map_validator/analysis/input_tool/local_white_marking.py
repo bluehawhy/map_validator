@@ -57,12 +57,22 @@ def local_white_marking_candidates(
         minLineLength=min_length, maxLineGap=max_hough_gap,
     )
     candidates = []
+    rejected_overlap_segments = 0
     if found is not None:
         for ax, ay, bx, by in found[:, 0]:
             dx, dy = int(bx) - int(ax), int(by) - int(ay)
             length = float(np.hypot(dx, dy))
             if length < min_length:
                 continue
+            if exclude_mask is not None:
+                # Even if Hough bridges a narrow masked gap, suppress the
+                # entire W segment that intersects an excluded object.
+                sample_count = max(abs(dx), abs(dy)) + 1
+                sx = np.rint(np.linspace(int(ax), int(bx), sample_count)).astype(np.intp)
+                sy = np.rint(np.linspace(int(ay), int(by), sample_count)).astype(np.intp)
+                if np.any(local_exclusion[sy, sx]):
+                    rejected_overlap_segments += 1
+                    continue
             angle = float(np.degrees(np.arctan2(dy, dx)) % 180)
             axis = (
                 "horizontal" if min(angle, 180 - angle) <= 22.5 else
@@ -120,6 +130,7 @@ def local_white_marking_candidates(
             else (["unspecified_white_mask"] if exclude_mask is not None else [])
         ),
         "excluded_white_pixels": excluded_pixels,
+        "rejected_mask_overlap_segments": rejected_overlap_segments,
         "palette_source": "color_ranges.json",
         "detection_rules": {
             "hsv_hue_range": [0, 179],
@@ -130,6 +141,7 @@ def local_white_marking_candidates(
             "hough_threshold": 5,
             "angle_restriction": None,
             "coverage_filter": None,
+            "mask_overlap_filter": "discard_entire_touching_fragment",
             "classification": "deferred",
             "pixel_exclusion": (
                 list(excluded_objects) if excluded_objects is not None

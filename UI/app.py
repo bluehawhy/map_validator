@@ -1089,7 +1089,8 @@ class MainWindow(QMainWindow):
                 details.append("── 노면화살표 검출 후보 (A · 검수 필요) ──")
                 details.append(
                     f"화살표 후보 {road_arrows.get('candidate_count', 0)}개 · "
-                    f"제외된 내부 흰색 {road_arrows.get('excluded_white_pixels', 0)}px"
+                    f"초록 외곽 기준 제외영역 {road_arrows.get('excluded_region_pixels', 0)}px · "
+                    f"포함 흰색 {road_arrows.get('excluded_white_pixels', 0)}px"
                 )
                 details.append(f"검출 결과: {road_arrows.get('reason', '판단 보류')}")
                 for item in arrow_items:
@@ -1097,7 +1098,8 @@ class MainWindow(QMainWindow):
                         f"  {item['candidate_id']}: 중심 {item['point']}px · "
                         f"회전 {item['angle_deg']:.1f}° · 외곽 {item['polygon']} · "
                         f"회색 {item['gray_pixels']}px / 초록 테두리 "
-                        f"{item['green_edge_pixels']}px / 흰색 {item['white_pixels']}px"
+                        f"{item['green_edge_pixels']}px / 흰색 {item['white_pixels']}px "
+                        f"· 마스킹 {item.get('mask_bbox')} (여유 {item.get('mask_margin_px', 0)}px)"
                     )
             if white_raw is not None:
                 details.append("── 흰색 선 조각 W (UI 문자·화살표 제외 후 · 미분류) ──")
@@ -1113,6 +1115,10 @@ class MainWindow(QMainWindow):
                         f"영역 {ui_text.get('regions', [])}"
                     )
                 details.append(f"흰색 검출: {white_raw.get('reason', '판단 보류')}")
+                details.append(
+                    f"제외 영역과 겹친 W 선분 제거: "
+                    f"{white_raw.get('rejected_mask_overlap_segments', 0)}개"
+                )
                 details.append(
                     f"원시 선 조각 {white_raw.get('shown_segments', 0)}/"
                     f"{white_raw.get('total_segments', 0)}개 "
