@@ -35,6 +35,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from .individual_review_controls import IndividualReviewControls
+from map_validator.analysis.line_grouping import (
+    CENTER_LINE_GROUPING_LIMITS, normalize_center_line_grouping,
+)
 from map_validator.app_logging import (
     AppLogFormatter,
     LOG_DIR,
@@ -361,6 +364,9 @@ class MainWindow(QMainWindow):
         self.stop_line_threshold_value = max(0.35, min(0.95, float(
             self.cfg.get("analysis", {}).get("stop_line_roadview_threshold", 0.68)
         )))
+        self.center_line_grouping_values = normalize_center_line_grouping(
+            self.cfg.get("analysis", {}).get("center_line_grouping")
+        )
         actions = QHBoxLayout()
         self.start_btn = QPushButton("촬영본 분석")
         self.start_btn.setObjectName("primary")
@@ -493,7 +499,7 @@ class MainWindow(QMainWindow):
         """Open threshold settings without occupying the capture workspace."""
         dialog = QDialog(self)
         dialog.setWindowTitle("분석 설정")
-        dialog.setMinimumWidth(350)
+        dialog.setMinimumWidth(385)
         dialog.setStyleSheet("QDialog { background-color: #F3F3F3; }")
         form = QVBoxLayout(dialog)
         form.setContentsMargins(18, 16, 18, 16)
@@ -512,6 +518,29 @@ class MainWindow(QMainWindow):
             "높을수록 엄격하게 판정하며, 판단 보류가 늘어날 수 있습니다. "
             "횡단보도는 정지선으로 판정하지 않습니다.", "hint"
         ))
+        form.addWidget(self._label("입력툴 노란 중앙선 · 선 그룹화", "section"))
+        center_controls = {}
+        center_fields = (
+            ("angle_tolerance_deg", "기울기 차이 허용 (°)", " °", 0.5),
+            ("perpendicular_tolerance_px", "같은 선상 수직거리 (px)", " px", 0.5),
+            ("max_gap_px", "선 방향 연결 간격 (px)", " px", 1.0),
+        )
+        for key, label, suffix, step in center_fields:
+            form.addWidget(self._label(label))
+            field = QDoubleSpinBox(dialog)
+            lower, upper, _default = CENTER_LINE_GROUPING_LIMITS[key]
+            field.setRange(lower, upper)
+            field.setDecimals(1)
+            field.setSingleStep(step)
+            field.setSuffix(suffix)
+            field.setValue(self.center_line_grouping_values[key])
+            form.addWidget(field)
+            center_controls[key] = field
+        form.addWidget(self._label(
+            "세 조건을 모두 만족할 때만 선 조각을 묶습니다. "
+            "평행한 별도 중앙선은 합치지 않도록 선상 거리를 확인합니다. "
+            "저장 후 기존 촬영본을 다시 분석하면 적용됩니다.", "hint"
+        ))
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save |
             QDialogButtonBox.StandardButton.Cancel,
@@ -524,10 +553,25 @@ class MainWindow(QMainWindow):
         form.addWidget(buttons)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             value = round(threshold.value(), 2)
-            if value != self.stop_line_threshold_value:
+            grouping = normalize_center_line_grouping(
+                {key: field.value() for key, field in center_controls.items()}
+            )
+            changed_threshold = value != self.stop_line_threshold_value
+            changed_grouping = grouping != self.center_line_grouping_values
+            if changed_threshold or changed_grouping:
                 self.stop_line_threshold_value = value
+                self.center_line_grouping_values = grouping
                 self._save_settings()
-                self._log(f"로드뷰 정지선 threshold 변경: {value:.2f}")
+                if changed_threshold:
+                    self._log(f"로드뷰 정지선 threshold 변경: {value:.2f}")
+                if changed_grouping:
+                    self._log(
+                        "입력툴 중앙선 그룹화 기준 변경: "
+                        f"기울기 ±{grouping['angle_tolerance_deg']:.1f}° · "
+                        f"수직거리 {grouping['perpendicular_tolerance_px']:.1f}px · "
+                        f"연결 간격 {grouping['max_gap_px']:.1f}px "
+                        "(다음 개별 촬영본 분석부터 적용)"
+                    )
 
     def _toggle_panel(self, key: str, expanded: bool) -> None:
         """Collapse/expand either pane; splitter handles remain draggable."""
@@ -723,6 +767,9 @@ class MainWindow(QMainWindow):
         cfg.setdefault("analysis", {})
         cfg["analysis"]["stop_line_roadview_threshold"] = round(
             self.stop_line_threshold_value, 2
+        )
+        cfg["analysis"]["center_line_grouping"] = dict(
+            self.center_line_grouping_values
         )
         cfg["windows"]["work_title"] = self.work_input.text().strip()
         cfg["windows"]["roadview_title"] = self.view_input.text().strip()
@@ -1081,6 +1128,9 @@ class MainWindow(QMainWindow):
             details.append("── 노란 중앙선 포인트 후보 (C) ──")
             details.append(
                 f"중앙선: {center_line.get('reason', '판단 보류')}"
+            )
+            details.append(
+                f"중앙선 그룹화 기준: {center_line.get('grouping_rules', '미확인')}"
             )
             details.append(
                 f"노란 선 조각 {center_line.get('shown_segments', 0)}/"
