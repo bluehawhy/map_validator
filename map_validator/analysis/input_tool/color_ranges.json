@@ -163,10 +163,12 @@
     "guidance_roi": {
       "half_width_fraction": 0.18,
       "above_position_fraction": 0.65,
+      "below_position_fraction": 0.04,
       "min_half_width_px": 55,
       "min_above_px": 45,
-      "stop_line_margin_px": 4,
-      "anchor": "cyan_stop_line_candidate_or_vehicle_fallback"
+      "min_below_px": 16,
+      "anchor": "current_position_red_marker",
+      "note": "GUIDE 상하단은 현재 위치 Y±도면높이 비율로 독립 산출. 정지선 후보/STOP/PATH 좌표를 참조하지 않음."
     },
     "approach_roi": {
       "half_width_fraction": 0.3,
@@ -175,20 +177,24 @@
       "min_half_width_px": 55,
       "min_above_px": 40,
       "min_below_px": 4,
-      "anchor": "vehicle_position_as_bottom_edge"
+      "anchor": "current_position_red_marker",
+      "note": "PATH는 현재 위치 Y-도면높이45%에서 Y+4px. 시작 위치를 아래 기준으로 독립 산출."
     },
     "notes": "유도선 RGB(0,128,255)와 진파랑 RGB(0,0,255)을 혼동하지 않는다. 색이 정확히 일치한 픽셀만 1차 검출. 글자/안티앨리어싱으로 인한 추가 색은 현장 검수 뒤 별도 보정.",
     "stop_roi": {
       "half_width_fraction": 0.18,
+      "above_position_fraction": 0.455,
       "below_position_fraction": 0.1,
       "min_half_width_px": 55,
+      "min_above_px": 32,
       "min_below_px": 35,
-      "guide_height_fraction": 0.7,
-      "anchor": "guide_roi_70_percent",
+      "anchor": "current_position_red_marker",
+      "guide_height_fraction_equivalent": 0.7,
       "used_by": [
         "stop_line_S_G",
         "road_arrow_A"
-      ]
+      ],
+      "note": "STOP 상단은 현재위치 Y-도면높이45.5% (GUIDE 상방 65%의 약 70%에 해당). GUIDE ROI 계산값은 사용하지 않음."
     }
   }
 }

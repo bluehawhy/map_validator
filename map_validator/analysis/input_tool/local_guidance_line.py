@@ -44,9 +44,9 @@ def _vehicle_roi(image: np.ndarray, point: list[float],
 
 def _guidance_roi(
     image: np.ndarray, point: list[float], canvas_bounds: list[int],
-    settings: dict, stop_line_y: int | None = None,
+    settings: dict,
 ) -> list[int] | None:
-    """Vehicle-to-cyan-reference guide ROI (cyan is review candidate only)."""
+    """GUIDE ROI is defined only by the current red position and canvas size."""
     height, width = image.shape[:2]
     canvas_left, canvas_top, canvas_right, canvas_bottom = map(int, canvas_bounds)
     canvas_left = max(0, canvas_left)
@@ -70,12 +70,14 @@ def _guidance_roi(
         int(settings["min_above_px"]),
         round(viewport_height * float(settings["above_position_fraction"])),
     )
-    margin = int(settings["stop_line_margin_px"])
+    below = max(
+        int(settings["min_below_px"]),
+        round(viewport_height * float(settings["below_position_fraction"])),
+    )
     x0 = max(canvas_left, round(px) - half)
     x1 = min(canvas_right, round(px) + half)
     y0 = max(canvas_top, round(py) - above)
-    reference_y = int(stop_line_y) if stop_line_y is not None else round(py)
-    y1 = min(canvas_bottom, reference_y + margin)
+    y1 = min(canvas_bottom, round(py) + below)
     return [x0, y0, x1, y1] if x1 > x0 and y1 > y0 else None
 
 
@@ -107,8 +109,6 @@ def _connected_groups(
     image: np.ndarray, point: list[float] | None,
     overlay: np.ndarray, *,
     canvas_bounds: list[int] | None = None,
-    stop_line_y: int | None = None,
-    stop_reference: dict | None = None,
     name: str, identifier: str, border_name: str,
 ) -> dict:
     if point is None:
@@ -118,7 +118,7 @@ def _connected_groups(
     scope = settings[roi_keys[name]]
     if canvas_bounds is None or len(canvas_bounds) != 4:
         return _unknown(f"{border_name} 도면 경계를 찾지 못했습니다.",name)
-    roi = (_guidance_roi(image,point,canvas_bounds,scope,stop_line_y)
+    roi = (_guidance_roi(image,point,canvas_bounds,scope)
            if name=="guidance" else
            _vehicle_roi(image,point,canvas_bounds,scope))
     if roi is None:
@@ -191,13 +191,11 @@ def _connected_groups(
         "roi_rules": {
             **dict(scope),
             "positioning": (
-                "vehicle_to_cyan_stop_reference"
-                if name == "guidance"
-                else "vehicle_position_upward"
+                "vehicle_position_independent_offsets"
             ),
             "position_point_px": [round(float(point[0]), 1), round(float(point[1]), 1)],
             "canvas_bounds": list(map(int, canvas_bounds)),
-            "stop_line_reference": stop_reference if name=="guidance" else None,
+            "anchor": "red_marker.point",
         },
         "palette_source": "color_ranges.json.blue_markings",
         "color_rgb": list(settings["colors"][name]["rgb"]),
@@ -214,12 +212,9 @@ def _connected_groups(
 def local_guidance_line_candidates(
     image: np.ndarray, point: list[float] | None, overlay: np.ndarray,
     *, canvas_bounds: list[int] | None = None,
-    stop_line_y: int | None = None,
-    stop_reference: dict | None = None,
 ) -> dict:
     return _connected_groups(
         image,point,overlay,canvas_bounds=canvas_bounds,
-        stop_line_y=stop_line_y,stop_reference=stop_reference,
         name="guidance",identifier="U",border_name="GUIDE ROI",
     )
 

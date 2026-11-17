@@ -1051,9 +1051,10 @@ class MainWindow(QMainWindow):
                 f"STOP ROI: {stop.get('roi', '미확인')}",
                 f"GUIDE ROI: {guide.get('roi', '미확인')}",
                 f"PATH ROI: {paths.get('roi', '미확인')}",
-                f"정지선 하단 기준: {result.get('stop_line_reference',{}).get('status','미확인')} "
-                f"({result.get('stop_line_reference',{}).get('reason','')})",
-                f"STOP 상단 GUIDE 비율: {stop.get('roi_rules',{}).get('guide_fraction','미확인')}",
+                "ROI 위치 공통 기준: 빨간 현재 위치 점 (세 영역 독립 계산)",
+                f"STOP 위쪽 범위: 도면 높이 "
+                f"{stop.get('roi_rules',{}).get('above_position_fraction','미확인')} "
+                "(GUIDE 상방 높이의 약 70%에 해당)",
                 f"중앙선·흰선 내부 탐색: {result.get('candidate_search_bounds','미확인')} "
                 "(별도 ROI 테두리 없음)",
                 f"시안색 선 후보: {candidate_label} (실제 정지선 개수 아님)",

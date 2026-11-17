@@ -207,3 +207,11 @@
 - PATH ROI: 현재 위치 빨간 마커를 아래쪽 기준점으로 삼아 **도면 높이 45% 위쪽**을 탐색한다. 마커 아래로는 4px 여유만 두며 도면 경계 밖으로 확장하지 않는다.
 - **LINE ROI 삭제:** 회색 사각형과 'LINE ROI' 라벨, 별도의 context_roi 결과 및 UI 안내를 제거한다. 중앙선 C와 흰선 W는 세 ROI를 포함하는 내부 직사각형 탐색 범위(`candidate_search_bounds`)에서 계속 검출하되 **네 번째 테두리를 그리지 않는다**. C/W의 `review_regions.border`는 `none`이다.
 - `blue_markings.guidance_roi/stop_roi/approach_roi` 수치를 갱신했고 ROI 3종(자주/주황/연파랑)은 유지한다. 기존 WGC 원본·검수 이력 보존. Windows 실환경 및 자동 테스트는 요청받지 않아 실행하지 않았다.
+
+## 2026-11-17 ROI 오해 정정: 모두 현재 위치 기준으로 독립 계산
+
+- **최신 확정 기준:** GUIDE, STOP, PATH의 상단/하단은 모두 **빨간 현재 위치 표시점 `red_marker.point`**의 화면 Y좌표에서 도면 높이의 고정 비율 또는 고정 px만큼 위아래로 이동하여 산정한다. ROI끼리 좌표를 참조하거나 먼저 검출된 시안색 선분을 ROI 경계로 사용하지 않는다. 위 2026-11-17 'GUIDE/STOP/PATH ROI 위치 재설정'에 기록된 **`stop_line_reference` 및 GUIDE 높이에 의존하는 STOP 상단 계산은 폐기**한다.
+- 공통 `canvas_bounds`는 영상 도면의 클리핑과 비율 크기 계산에만 사용한다. `GUIDE ROI`: 위 65%, 아래 4%, 좌우 반폭 도면 너비 18%. `STOP ROI`: 위 **45.5%**, 아래 10%, 좌우 반폭 18%. 이 45.5%는 이전 GUIDE 상방 높이 65%의 **약 70%에 해당하는 고정 크기**라는 뜻이며 실제 GUIDE ROI 좌표와 무관하다. `PATH ROI`: 위 45%, 아래 4px, 좌우 반폭 30%. 작은 도면에서 각 `min_*_px` 기준을 적용한다.
+- `map_validator/analysis/input_tool/local_stop_line.py`에서 `detect_stop_line_reference`를 삭제하고 `guide_roi`, `stop_reference` 인수와 연결된 계산을 제거한다. `local_guidance_line.py`에서도 `stop_line_y`, `stop_reference` 인수를 제거한다. `individual_capture.py`는 동일한 `point`와 `canvas_bounds`를 세 검출기에 각각 전달한다. JSON의 `stop_line_reference` 최상위 필드는 새 분석 결과에서 제거하며, 검사 목적 외부 원본 PNG와 이전 분석 이력은 보존한다.
+- 기존 S/G 및 A 공통 STOP ROI, U GUIDE, P PATH, C/W의 내부 후보 검출(`candidate_search_bounds`)은 유지한다. LINE ROI 테두리는 복구하지 않는다. 또한 정지선 검출의 선 길이 계산에서 이미지 크기 변수의 기존 불일치(`height,width` 미정의)를 `h,w`로 바로잡는다.
+- **검증 상태:** 원격 소스·호출 관계 정적 확인만 실시. Windows 현장 실행·자동 테스트 및 테스트 코드 추가는 요청받지 않아 수행하지 않았다.

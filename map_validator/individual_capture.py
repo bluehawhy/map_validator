@@ -16,7 +16,6 @@ import numpy as np
 
 from .analysis.input_tool.local_stop_line import (
     local_stop_line_candidates, paint_stop_line_roi_border,
-    detect_stop_line_reference,
 )
 from .analysis.input_tool.local_center_line import local_center_line_candidates
 from .analysis.input_tool.local_guidance_line import (
@@ -208,17 +207,16 @@ def capture_and_analyze(
             cv2.FONT_HERSHEY_SIMPLEX, .5, (0, 255, 255), 1, cv2.LINE_AA,
         )
     bounds = marker.get("canvas_bounds")
-    reference = detect_stop_line_reference(input_tool_image,point,bounds)
+    # All three ROIs use the same red marker and black canvas bounds.
+    # None of their boundaries depend on a detected line or another ROI.
     guide_lines = local_guidance_line_candidates(
-        input_tool_image,point,overlay,canvas_bounds=bounds,
-        stop_line_y=reference.get("y"),stop_reference=reference,
+        input_tool_image, point, overlay, canvas_bounds=bounds,
     )
     stop_line = local_stop_line_candidates(
-        input_tool_image,point,overlay,canvas_bounds=bounds,
-        guide_roi=guide_lines.get("roi"),stop_reference=reference,
+        input_tool_image, point, overlay, canvas_bounds=bounds,
     )
     approach_paths = local_approach_path_candidates(
-        input_tool_image,point,overlay,canvas_bounds=bounds,
+        input_tool_image, point, overlay, canvas_bounds=bounds,
     )
     available = [x["roi"] for x in (guide_lines,stop_line,approach_paths)
                  if x.get("roi") is not None]
@@ -228,8 +226,8 @@ def capture_and_analyze(
                     max(x[3] for x in available)]
                    if available else None)
     APP_LOG.info(
-        "[개별촬영][ROI] 정지선참조=%s GUIDE=%s STOP=%s PATH=%s C/W내부=%s",
-        reference.get("status"),guide_lines.get("roi"),stop_line.get("roi"),
+        "[개별촬영][ROI] 기준=red_marker.point 현재위치=%s GUIDE=%s STOP=%s PATH=%s C/W내부=%s",
+        point, guide_lines.get("roi"),stop_line.get("roi"),
         approach_paths.get("roi"),scan_bounds,
     )
     for group in stop_line.get("line_groups",[]):
@@ -374,7 +372,6 @@ def capture_and_analyze(
             "road_id": None, "angle_deg": None, "heading_deg": None,
         },
         "candidate_search_bounds": scan_bounds,
-        "stop_line_reference": reference,
         "checks": {"stop_line": stop_line, "center_line": center_line,
                    "guidance_lines": guide_lines,
                    "approach_paths": approach_paths,

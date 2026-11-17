@@ -13,79 +13,12 @@ from ..line_grouping import group_line_segments
 from .blue_palette import blue_color_mask, blue_palette
 
 
-def detect_stop_line_reference(
-    image: np.ndarray, point: list[float] | None,
-    canvas_bounds: list[int] | None,
-) -> dict:
-    """Provisional nearest cyan segment ahead of car (NOT verified stop line)."""
-    unavailable = {"status": "not_available", "y": None,
-                   "point": None, "endpoints": None,
-                   "reason": "현재 위치나 도면 경계가 없습니다."}
-    if point is None or canvas_bounds is None or len(canvas_bounds) != 4:
-        return unavailable
-    h, w = image.shape[:2]
-    left, top, right, bottom = map(int, canvas_bounds)
-    left, top, right, bottom = max(0,left), max(0,top), min(w,right), min(h,bottom)
-    cx, cy = map(float, point)
-    if not (left <= cx < right and top <= cy < bottom):
-        return {**unavailable, "reason": "현재 위치가 도면 밖입니다."}
-    settings = blue_palette()
-    guide = settings["guidance_roi"]
-    stop = settings["stop_roi"]
-    half = max(int(stop["min_half_width_px"]),
-               round((right-left)*float(stop["half_width_fraction"])))
-    above = max(int(guide["min_above_px"]),
-                round((bottom-top)*float(guide["above_position_fraction"])))
-    x0, x1 = max(left,round(cx)-half), min(right,round(cx)+half)
-    y0 = max(top,round(cy)-above)
-    y1 = min(bottom,round(cy)+int(guide["stop_line_margin_px"])+2)
-    if x0>=x1 or y0>=y1:
-        return {**unavailable, "reason": "시안색 후보 탐색 범위가 없습니다."}
-    mask = blue_color_mask(image[y0:y1,x0:x1], "stop_line")
-    mask = cv2.morphologyEx(mask,cv2.MORPH_CLOSE,np.ones((2,2),np.uint8))
-    minimum = max(14,round(min(h,w)*.042))
-    lines = cv2.HoughLinesP(mask,1,np.pi/180,
-                            threshold=max(9,minimum//2),
-                            minLineLength=minimum,maxLineGap=5)
-    nearest = None
-    if lines is not None:
-        car = np.array([cx,cy],dtype=float)
-        for xa,ya,xb,yb in lines[:,0]:
-            a = np.array([float(xa+x0),float(ya+y0)])
-            b = np.array([float(xb+x0),float(yb+y0)])
-            v = b-a
-            sq = float(v @ v)
-            if sq < minimum*minimum:
-                continue
-            t = max(0.0,min(1.0,float((car-a) @ v/sq)))
-            q = a+t*v
-            if q[1] > cy+2:
-                continue
-            distance = float(np.hypot(*(car-q)))
-            if nearest is None or distance < nearest["distance_px"]:
-                nearest = {
-                    "status": "cyan_segment_candidate",
-                    "y": int(round(float(q[1]))),
-                    "point": [round(float(q[0]),1),round(float(q[1]),1)],
-                    "endpoints": [a.astype(int).tolist(),b.astype(int).tolist()],
-                    "distance_px": round(distance,1),
-                    "reason": "최근접 상단 시안색 선분(실제 정지선 여부 미확정)",
-                }
-    if nearest is not None:
-        return nearest
-    return {"status":"vehicle_position_fallback","y":round(cy),
-            "point":[round(cx,1),round(cy,1)],"endpoints":None,
-            "reason":"시안색 후보가 없어서 차량 Y를 임시 하단으로 사용"}
-
-
 def local_stop_line_candidates(
     image: np.ndarray, point: list[float] | None, overlay: np.ndarray,
     *, canvas_bounds: list[int] | None = None,
-    guide_roi: list[int] | None = None,
-    stop_reference: dict | None = None,
 ) -> dict:
-    if point is None or canvas_bounds is None or guide_roi is None:
-        return {**unknown("차량 위치·GUIDE ROI 미확인"),"roi":None}
+    if point is None or canvas_bounds is None or len(canvas_bounds) != 4:
+        return {**unknown("현재 위치 또는 도면 경계 미확인"),"roi":None}
     h,w = image.shape[:2]
     left,top,right,bottom = map(int,canvas_bounds)
     left,top,right,bottom = max(0,left),max(0,top),min(w,right),min(h,bottom)
@@ -95,14 +28,12 @@ def local_stop_line_candidates(
     rule = blue_palette()["stop_roi"]
     half = max(int(rule["min_half_width_px"]),
                round((right-left)*float(rule["half_width_fraction"])))
+    above = max(int(rule["min_above_px"]),
+                round((bottom-top)*float(rule["above_position_fraction"])))
     below = max(int(rule["min_below_px"]),
                 round((bottom-top)*float(rule["below_position_fraction"])))
-    guide_top,guide_bottom = int(guide_roi[1]),int(guide_roi[3])
-    fraction = float(rule["guide_height_fraction"])
-    if not (0 <= fraction <= 1 and guide_bottom > guide_top):
-        return {**unknown("GUIDE ROI/STOP 70% 설정이 유효하지 않습니다."),"roi":None}
     x0,x1 = max(left,round(cx)-half),min(right,round(cx)+half)
-    y0 = max(top,round(guide_top+(guide_bottom-guide_top)*fraction))
+    y0 = max(top,round(cy)-above)
     y1 = min(bottom,round(cy)+below)
     if x1<=x0 or y1<=y0:
         return {**unknown("STOP ROI가 유효하지 않습니다."),"roi":None}
@@ -114,7 +45,7 @@ def local_stop_line_candidates(
     cyan = cv2.morphologyEx(cyan, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
     # Keep the old per-image line sensitivity. Scaling the minimum line
     # length with the wider ROI would silently discard shorter stop lines.
-    minimum = max(14, round(min(height, width) * .042))
+    minimum = max(14, round(min(h, w) * .042))
     hough = cv2.HoughLinesP(
         cyan, 1, np.pi / 180, threshold=max(9, minimum // 2),
         minLineLength=minimum, maxLineGap=5,
@@ -215,7 +146,7 @@ def local_stop_line_candidates(
     return {
         "value": None,
         "confidence": None,
-        "method": "red_marker_local_cyan_lines_v5_guide_70pct",
+        "method": "red_marker_local_cyan_lines_v6_position_relative",
         "reason": ("빨간 기준점 주변의 시안색 선 후보입니다. 정지선/도로 경계의 구별은 수동 검증이 필요합니다."
                    if lines else "빨간 기준점 주변에서 시안색 선 후보를 찾지 못했습니다. 정지선 없음으로 확정하지 않습니다."),
         "roi": [x0,y0,x1,y1],
@@ -223,10 +154,10 @@ def local_stop_line_candidates(
         "color_rgb":[0,255,255],
         "roi_rules":{
             **dict(rule),
-            "positioning":"guide_roi_top_plus_70_percent",
-            "guide_roi":guide_roi,
-            "guide_fraction":fraction,
-            "stop_line_reference":stop_reference,
+            "positioning":"current_position_independent_offsets",
+            "anchor":"red_marker.point",
+            "above_fraction":rule["above_position_fraction"],
+            "equivalent_to_guide_upward_height_fraction":rule["guide_height_fraction_equivalent"],
             "position_point_px":[round(cx,1),round(cy,1)],
             "canvas_bounds":[left,top,right,bottom],
             "red_line_detection":False,
