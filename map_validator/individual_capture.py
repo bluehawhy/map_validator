@@ -273,7 +273,8 @@ def capture_and_analyze(
     )
     paint_arrow_candidates(overlay, road_arrows)
     guide_lines = local_guidance_line_candidates(
-        input_tool_image, point, overlay, stop_roi=stop_line.get("roi"),
+        input_tool_image, point, overlay,
+        canvas_bounds=marker.get("canvas_bounds"),
     )
     approach_paths = local_approach_path_candidates(
         input_tool_image, point, overlay, stop_roi=stop_line.get("roi"),

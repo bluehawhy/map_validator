@@ -48,3 +48,10 @@
 - 2026-11-17: 초록·주황·진파랑 그룹을 U로 보는 초기 실험을 폐기하고, 실제 유도선 `RGB(0,128,255)`와 진입 경로선 `RGB(121,171,255)`를 독립 분류했습니다.
 
 - 2026-11-17 오류 수정: `local_guidance_line.py`의 진입 경로선 이름 `approach_path`와 ROI 설정 키 `approach_roi`가 일치하지 않아 `KeyError: 'approach_path_roi'`가 발생하던 문제를 수정했습니다. 유도선은 `guidance_roi`, 진입 경로선은 `approach_roi`를 명시적으로 조회합니다. 기존 r001/r002 원본 및 검출 조건은 변경하지 않습니다. Windows 실환경 분석 재실행은 미검증입니다.
+
+## 2026-11-17 현장 피드백: GUIDE ROI 차량 위치 기준 상향 배치
+
+- 검수 이미지에서 GUIDE ROI가 지나치게 넓고 **HDL View 글자 하단(Y)부터 아래쪽까지** 이어져 차량 앞쪽 유도선 위치를 충분히 포함하지 못했다. 검수자가 분홍색으로 표시한 형태처럼 **현재 위치 빨간 사각형을 아래쪽 기준점**으로 삼고, 도면 위쪽으로 긴 세로 ROI를 배치한다.
+- GUIDE ROI는 빨간 현재 위치 `point`와 검은 도면 경계 `canvas_bounds`로 독립 계산한다. **좌우 반폭 도면 너비의 18%(최소 55px), 위쪽 도면 높이 65%(최소 45px), 아래쪽 4%(최소 16px)**이며 도면 경계에 맞춰 자른다. 현재 위치가 유효하지 않으면 임의의 영역을 만들지 않는다. 빨간 현재 위치 표시점 주변의 상단 도면까지 포함할 수 있고, **STOP ROI의 상단 및 HDL View 글자 하단으로 GUIDE ROI 상단을 제한하지 않는다.**
+- `GUIDE ROI` 자주색 테두리, U# 후보·원본 RGB(0,128,255)·8연결 그룹화는 유지한다. 결과 `checks.guidance_lines.roi`와 `roi_rules.positioning=vehicle_position_to_canvas_top`, `position_point_px`, `canvas_bounds`에 계산 기준을 기록한다.
+- `STOP ROI`의 S/G/C/A/W와 `PATH ROI`의 P#는 **이번 변경에서 범위·기준을 수정하지 않는다**. WGC 수동 촬영 및 기존 원본 PNG·JSON 이력은 보존한다. Windows 실환경에서 ROI 크기/유도선 포함률은 별도 현장 확인이 필요하며 테스트 코드는 추가·실행하지 않았다.

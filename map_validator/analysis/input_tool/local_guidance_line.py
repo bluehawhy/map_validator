@@ -45,6 +45,49 @@ def _vehicle_roi(
     return [x0, y0, x1, y1]
 
 
+def _guidance_roi(
+    image: np.ndarray, point: list[float], canvas_bounds: list[int],
+    settings: dict,
+) -> list[int] | None:
+    """Vehicle-centred, upward-looking guidance search, independent of STOP ROI.
+
+    The current-position red square is the bottom anchor; the search extends
+    toward the top of the real black map viewport (not the window toolbar).
+    """
+    height, width = image.shape[:2]
+    canvas_left, canvas_top, canvas_right, canvas_bottom = map(int, canvas_bounds)
+    canvas_left = max(0, canvas_left)
+    canvas_top = max(0, canvas_top)
+    canvas_right = min(width, canvas_right)
+    canvas_bottom = min(height, canvas_bottom)
+    if canvas_right <= canvas_left or canvas_bottom <= canvas_top:
+        return None
+
+    px, py = float(point[0]), float(point[1])
+    if not (canvas_left <= px < canvas_right and canvas_top <= py < canvas_bottom):
+        return None
+
+    viewport_width = canvas_right - canvas_left
+    viewport_height = canvas_bottom - canvas_top
+    half = max(
+        int(settings["min_half_width_px"]),
+        round(viewport_width * float(settings["half_width_fraction"])),
+    )
+    above = max(
+        int(settings["min_above_px"]),
+        round(viewport_height * float(settings["above_position_fraction"])),
+    )
+    below = max(
+        int(settings["min_below_px"]),
+        round(viewport_height * float(settings["below_position_fraction"])),
+    )
+    x0 = max(canvas_left, round(px) - half)
+    x1 = min(canvas_right, round(px) + half)
+    y0 = max(canvas_top, round(py) - above)
+    y1 = min(canvas_bottom, round(py) + below)
+    return [x0, y0, x1, y1] if x1 > x0 and y1 > y0 else None
+
+
 def _paint_candidate(
     overlay: np.ndarray, candidate: dict, contours: list[np.ndarray],
     origin: tuple[int, int], stroke: tuple[int, int, int],
@@ -72,16 +115,24 @@ def _paint_candidate(
 def _connected_groups(
     image: np.ndarray, point: list[float] | None,
     overlay: np.ndarray, *, stop_roi: list[int] | None,
+    canvas_bounds: list[int] | None = None,
     name: str, identifier: str, border_name: str,
 ) -> dict:
-    if point is None or stop_roi is None or len(stop_roi) != 4:
-        return _unknown("현재 위치 또는 HDL View 기준 분석 ROI 미확인", name)
+    if point is None:
+        return _unknown("빨간 현재 위치 표시점을 확인하지 못했습니다.", name)
     settings = blue_palette()
-    # The approach-path colour key is "approach_path", but its ROI setting
-    # is named "approach_roi". Keep the lookup explicit for both detectors.
+    # U: upwards from the detected car, bounded by the black map viewport.
+    # P: existing below-car / HDL text search area, unchanged.
     roi_keys = {"guidance": "guidance_roi", "approach_path": "approach_roi"}
     scope = settings[roi_keys[name]]
-    roi = _vehicle_roi(image, point, stop_roi, scope)
+    if name == "guidance":
+        if canvas_bounds is None or len(canvas_bounds) != 4:
+            return _unknown("GUIDE ROI 도면 경계를 확인하지 못했습니다.", name)
+        roi = _guidance_roi(image, point, canvas_bounds, scope)
+    else:
+        if stop_roi is None or len(stop_roi) != 4:
+            return _unknown("PATH ROI 기준 STOP ROI가 확인되지 않았습니다.", name)
+        roi = _vehicle_roi(image, point, stop_roi, scope)
     if roi is None:
         return _unknown("차량 기준 검출 범위가 유효하지 않습니다.", name)
 
@@ -148,7 +199,20 @@ def _connected_groups(
             f"{border_name} 내부에서 해당 RGB 후보를 찾지 못했습니다. "
             "오브젝트 없음으로 확정하지 않습니다."
         ),
-        "roi": roi, "roi_rules": dict(scope),
+        "roi": roi,
+        "roi_rules": {
+            **dict(scope),
+            "positioning": (
+                "vehicle_position_to_canvas_top"
+                if name == "guidance"
+                else "vehicle_position_within_stop_roi"
+            ),
+            "position_point_px": [round(float(point[0]), 1), round(float(point[1]), 1)],
+            "canvas_bounds": (
+                list(map(int, canvas_bounds))
+                if name == "guidance" and canvas_bounds is not None else None
+            ),
+        },
         "palette_source": "color_ranges.json.blue_markings",
         "color_rgb": list(settings["colors"][name]["rgb"]),
         "palette": {name: list(settings["colors"][name]["rgb"])},
@@ -163,10 +227,11 @@ def _connected_groups(
 
 def local_guidance_line_candidates(
     image: np.ndarray, point: list[float] | None, overlay: np.ndarray,
-    *, stop_roi: list[int] | None,
+    *, stop_roi: list[int] | None = None,
+    canvas_bounds: list[int] | None = None,
 ) -> dict:
     return _connected_groups(
-        image, point, overlay, stop_roi=stop_roi,
+        image, point, overlay, stop_roi=stop_roi, canvas_bounds=canvas_bounds,
         name="guidance", identifier="U", border_name="GUIDE ROI",
     )
 

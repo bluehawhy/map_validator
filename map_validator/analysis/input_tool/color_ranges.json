@@ -161,13 +161,15 @@
     "min_connected_pixels": 18,
     "min_group_span_px": 18,
     "guidance_roi": {
-      "half_width_fraction": 0.34,
-      "above_position_fraction": 0.34,
-      "below_position_fraction": 0.24,
+      "half_width_fraction": 0.18,
+      "above_position_fraction": 0.65,
+      "below_position_fraction": 0.04,
       "min_half_width_px": 55,
       "min_above_px": 45,
-      "min_below_px": 35,
-      "top_inset_from_stop_roi_px": 6
+      "min_below_px": 16,
+      "anchor": "current_position_red_marker",
+      "vertical_limit": "black_canvas_top_to_current_position_plus_below",
+      "note": "차량(빨간 사각형) 중심의 좌우 좁은 폭, 차량보다 위를 주로 탐색. 지도 도면 canvas_bounds 기준으로 클립하며 STOP ROI/HDL View 글자 하단에는 종속되지 않음."
     },
     "approach_roi": {
       "half_width_fraction": 0.3,
