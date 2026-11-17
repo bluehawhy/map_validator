@@ -6,8 +6,31 @@ it does not classify the line's purpose or approve an inspection result.
 """
 from __future__ import annotations
 
-from math import atan2, cos, degrees, hypot, pi, sin
+from math import atan2, cos, degrees, hypot, isfinite, pi, sin
 from typing import Sequence
+
+# Defaults are local image-pixel tolerances for yellow centre-line *candidate*
+# grouping. They are independent from stop-line and white-lane thresholds.
+CENTER_LINE_GROUPING_LIMITS = {
+    "angle_tolerance_deg": (0.0, 30.0, 8.0),
+    "perpendicular_tolerance_px": (0.0, 30.0, 5.0),
+    "max_gap_px": (0.0, 120.0, 12.0),
+}
+
+
+def normalize_center_line_grouping(config: dict | None = None) -> dict[str, float]:
+    """Validate saved/UI values before using them for candidate grouping."""
+    source = config if isinstance(config, dict) else {}
+    normalized = {}
+    for key, (lower, upper, default) in CENTER_LINE_GROUPING_LIMITS.items():
+        try:
+            value = float(source.get(key, default))
+        except (TypeError, ValueError):
+            value = default
+        if not isfinite(value):
+            value = default
+        normalized[key] = round(max(lower, min(upper, value)), 2)
+    return normalized
 
 
 def _geometry(segment: dict) -> dict:
