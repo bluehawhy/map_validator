@@ -37,8 +37,12 @@ def validate_stage(stage: str) -> str:
 
 def validate_case_id(case_id: str) -> str:
     case_id = case_id.strip()
-    if not case_id or not re.fullmatch(r"[A-Za-z0-9 _-]+", case_id):
-        raise ValueError("검수 ID는 영문/숫자/공백/-/_만 사용할 수 있습니다.")
+    # Allow only the review tool's controlled Korean direction suffix,
+    # not arbitrary Unicode or path separators, in a folder identifier.
+    if not case_id or not re.fullmatch(r"[A-Za-z0-9 _-]+(?:_(?:정|역))?", case_id):
+        raise ValueError(
+            "검수 ID는 영문/숫자/공백/-/_ 및 Link 끝의 _정/_역만 사용할 수 있습니다."
+        )
     if case_id in {".", ".."}:
         raise ValueError("올바르지 않은 검수 ID입니다.")
     return case_id

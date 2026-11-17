@@ -236,8 +236,25 @@ def set_zoom_value(window, value: int) -> None:
     raise RuntimeError(f"zoom could not reach {requested}; last value was {current}")
 
 def _intersection_number(value: str, kind: str) -> str | None:
-    """Extract only a Polygon/Link identifier, not another number in the row."""
-    match = re.search(rf"\b{kind}\s*[:#-]?\s*(\d+)\b", value, re.IGNORECASE)
+    """Extract a Polygon or a directional Link, never an unrelated row count.
+
+    The updated review tool names Link items like 'Link 888_정' or 'Link 443_역'.
+    Both '_' and Hangul are regex word characters; the old digit+word-boundary
+    expression failed on these labels and triggered slow fallback searches.
+    Keep the direction in the identity to distinguish the two link variants.
+    """
+    if kind.casefold() == "link":
+        match = re.search(
+            r"\bLink\s*[:#-]?\s*(\d+)"
+            r"(?:\s*[_-]\s*(정방향|역방향|정|역))?(?!\w)",
+            value, re.IGNORECASE,
+        )
+        if not match:
+            return None
+        direction = match.group(2)
+        return f"{match.group(1)}_{direction[0]}" if direction else match.group(1)
+
+    match = re.search(r"\bPolygon\s*[:#-]?\s*(\d+)(?!\w)", value, re.IGNORECASE)
     return match.group(1) if match else None
 
 
