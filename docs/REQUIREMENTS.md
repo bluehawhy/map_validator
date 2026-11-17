@@ -348,3 +348,10 @@
 - `map_validator/analysis/input_tool/local_stop_line.py`에서 `detect_stop_line_reference`를 삭제하고 `guide_roi`, `stop_reference` 인수와 연결된 계산을 제거한다. `local_guidance_line.py`에서도 `stop_line_y`, `stop_reference` 인수를 제거한다. `individual_capture.py`는 동일한 `point`와 `canvas_bounds`를 세 검출기에 각각 전달한다. JSON의 `stop_line_reference` 최상위 필드는 새 분석 결과에서 제거하며, 검사 목적 외부 원본 PNG와 이전 분석 이력은 보존한다.
 - 기존 S/G 및 A 공통 STOP ROI, U GUIDE, P PATH, C/W의 내부 후보 검출(`candidate_search_bounds`)은 유지한다. LINE ROI 테두리는 복구하지 않는다. 또한 정지선 검출의 선 길이 계산에서 이미지 크기 변수의 기존 불일치(`height,width` 미정의)를 `h,w`로 바로잡는다.
 - **검증 상태:** 원격 소스·호출 관계 정적 확인만 실시. Windows 현장 실행·자동 테스트 및 테스트 코드 추가는 요청받지 않아 수행하지 않았다.
+
+## 2026-11-17 입력툴 중앙선 그룹화 현장 보정 설정
+
+- 개별 저장 촬영본의 **노란 중앙선 C# 그룹 후보**는 기존 `group_line_segments`를 재사용하며 기울기 차이, 수직거리, 선 방향 연결 간격 세 기준을 동시에 적용한다. 같은 기울기라도 떨어진 평행한 다른 선을 그룹으로 자동 병합하지 않는다.
+- 중앙선 그룹화의 현장 보정값은 `analysis.center_line_grouping` 아래 `angle_tolerance_deg`(기본 8°, 허용 0~30°), `perpendicular_tolerance_px`(기본 5px, 허용 0~30px), `max_gap_px`(기본 12px, 허용 0~120px)이다.
+- 사용자가 상단 톱니바퀴 설정에서 변경·저장한 값은 다음 **개별 촬영본 분석**부터 적용하며, 해당 결과의 `checks.center_line.grouping_rules`에 실제 적용된 값을 남긴다. 기존 촬영 PNG나 정지선/흰선의 그룹화 임계값, 현재 선택 Polygon/Link 식별자는 변경하거나 함께 저장하지 않는다.
+- 수치 변경으로 하나의 물리적 중앙선이 여러 C 후보로 분리되거나 다른 선이 잘못 합쳐질 수 있다. **검수 보조 후보**이며 실제 중앙선 수·도로 판정으로 자동 확정하지 않는다. Windows 현장 검증 및 테스트는 별도 요청 전 수행하지 않는다.
