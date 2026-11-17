@@ -100,6 +100,7 @@ def capture_and_analyze(
     folder: Path, case_id: str, input_tool_image: np.ndarray | None,
     *, unassigned: bool = False, capture_only: bool = False,
     existing_revision: int | None = None,
+    center_line_grouping: dict | None = None,
 ) -> dict:
     validate_case_id(case_id)
     if existing_revision is None and (input_tool_image is None or input_tool_image.size == 0):
@@ -238,6 +239,7 @@ def capture_and_analyze(
         )
     center_line = local_center_line_candidates(
         input_tool_image,point,overlay,roi=scan_bounds,
+        grouping_rules=center_line_grouping,
     )
     raw_white = local_white_marking_candidates(
         input_tool_image,point,np.zeros_like(overlay),roi=scan_bounds,
@@ -266,9 +268,10 @@ def capture_and_analyze(
     paint_guidance_roi_border(overlay,guide_lines)
     paint_approach_roi_border(overlay,approach_paths)
     APP_LOG.info(
-        "[개별촬영][중앙선] 노란조각=%s 포인트후보=%s ROI=%s",
+        "[개별촬영][중앙선] 노란조각=%s 포인트후보=%s ROI=%s 그룹화=%s",
         center_line.get("total_segments",0),
         center_line.get("shown_points",0),center_line.get("roi"),
+        center_line.get("grouping_rules"),
     )
     APP_LOG.info(
         "[개별촬영][유도선/경로] U=%s P=%s",
@@ -446,10 +449,14 @@ def capture_individual(
                                unassigned=unassigned, capture_only=True)
 
 
-def analyze_individual(folder: Path, case_id: str, revision: int) -> dict:
+def analyze_individual(
+    folder: Path, case_id: str, revision: int,
+    *, center_line_grouping: dict | None = None,
+) -> dict:
     """Recompute a selected saved photo, replacing only this version's derived files."""
     return capture_and_analyze(
         folder, case_id, None,
         unassigned=folder.parent.name == "_unassigned_individual",
         existing_revision=revision,
+        center_line_grouping=center_line_grouping,
     )
