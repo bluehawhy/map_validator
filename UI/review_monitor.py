@@ -2,8 +2,8 @@
 
 A foreground event registers a low-level mouse hook only for the review window.\nThe hook detects the user's click without repeatedly
 querying Windows UI Automation. The hook callback only queues a notification;
-a separate reader thread checks the Polygon/Link selection 200 ms later so
-neither the Qt event loop nor the global mouse hook blocks on UIA.
+a separate reader thread checks the Polygon/Link selection after a short
+settling delay, rejecting older click generations without blocking Qt.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ WH_MOUSE_LL = 14
 WM_LBUTTONUP = 0x0202
 WM_QUIT = 0x0012
 PM_REMOVE = 0x0001
-SELECTION_SETTLE_SECONDS = 0.20
+SELECTION_SETTLE_SECONDS = 0.12
 
 
 def _comparable_title(value: str) -> str:
@@ -36,8 +36,8 @@ def _comparable_title(value: str) -> str:
 class ReviewSelectionMonitor(QThread):
     """Listen to click events without moving, activating, or resizing windows."""
 
-    selection_changed = pyqtSignal(str)
-    manual_selection_ready = pyqtSignal(str)
+    selection_changed = pyqtSignal(str, int)
+    manual_selection_ready = pyqtSignal(str, int)
     manual_selection_finished = pyqtSignal()
 
     def __init__(self, review_title: str, parent=None) -> None:
@@ -50,16 +50,36 @@ class ReviewSelectionMonitor(QThread):
         self._pending = False
         self._manual_pending = False
         self._last_click_at = 0.0
+        self._generation = 0
+        self._force_emit_next = False
+
+    def is_latest(self, generation: int) -> bool:
+        """Permit queued Qt delivery only for the most recent selection."""
+        with self._condition:
+            return (generation == self._generation
+                    and not self._paused.is_set()
+                    and not self._stop.is_set())
 
     def set_paused(self, paused: bool) -> None:
         with self._condition:
             cancelled_manual = paused and self._pending and self._manual_pending
+            was_paused = self._paused.is_set()
             if paused:
                 self._paused.set()
+                self._generation += 1  # invalidate an in-flight lookup
                 self._pending = False
                 self._manual_pending = False
             else:
                 self._paused.clear()
+                if was_paused and not self._stop.is_set():
+                    # Work may have changed the displayed ID while the hook
+                    # was paused. Refresh once without needing another click.
+                    self._generation += 1
+                    self._pending = True
+                    self._force_emit_next = True
+                    self._last_click_at = (
+                        time.monotonic() - SELECTION_SETTLE_SECONDS
+                    )
             self._condition.notify_all()
         if cancelled_manual:
             self.manual_selection_finished.emit()
@@ -75,6 +95,7 @@ class ReviewSelectionMonitor(QThread):
                 return False
             self._manual_pending = True
             self._pending = True
+            self._generation += 1
             # The click-settle delay is unnecessary for an explicit refresh.
             self._last_click_at = time.monotonic() - SELECTION_SETTLE_SECONDS
             self._condition.notify_all()
@@ -88,6 +109,7 @@ class ReviewSelectionMonitor(QThread):
         with self._condition:
             self._last_click_at = time.monotonic()
             self._pending = True
+            self._generation += 1
             self._condition.notify()
 
     def _read_after_click(self) -> None:
@@ -117,6 +139,9 @@ class ReviewSelectionMonitor(QThread):
                             return
                         click_at = self._last_click_at
                         manual = self._manual_pending
+                        generation = self._generation
+                        force_emit = self._force_emit_next
+                        self._force_emit_next = False
                         self._manual_pending = False
                         self._pending = False
 
@@ -138,14 +163,20 @@ class ReviewSelectionMonitor(QThread):
                             self.review_title,
                             diagnostic=lambda message: APP_LOG.info("선택 조회 · %s", message),
                         )
-                        outcome = "변경" if selected and selected != last_selection else "변경 없음"
-                        if (selected and not self._paused.is_set()
-                                and not self._stop.is_set()):
+                        if not self.is_latest(generation):
+                            outcome = "이전 클릭 결과 폐기"
+                            APP_LOG.info(
+                                "선택 조회 지연 결과 무시: 세대=%d, 새 클릭 우선",
+                                generation,
+                            )
+                        elif selected:
+                            outcome = ("변경" if selected != last_selection
+                                       else "변경 없음")
                             last_selection = selected
                             if manual:
-                                self.manual_selection_ready.emit(selected)
-                            elif outcome == "변경":
-                                self.selection_changed.emit(selected)
+                                self.manual_selection_ready.emit(selected, generation)
+                            elif outcome == "변경" or force_emit:
+                                self.selection_changed.emit(selected, generation)
                     except Exception as exc:
                         # The selection or window may disappear during a read.
                         APP_LOG.warning("선택 조회 실패 · %s: %s", type(exc).__name__, exc)

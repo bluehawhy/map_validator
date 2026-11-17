@@ -627,10 +627,12 @@ class MainWindow(QMainWindow):
             return
         self.review_select_btn.setEnabled(False)
 
-    def _on_manual_review_selection(self, review_id: str) -> None:
-        if self._close_pending or (
-            self.worker is not None and self.worker.isRunning()
-        ):
+    def _on_manual_review_selection(self, review_id: str, generation: int) -> None:
+        monitor = self.review_monitor
+        if (monitor is None or not monitor.is_latest(generation)
+                or self._close_pending or (
+                    self.worker is not None and self.worker.isRunning()
+                )):
             return
         self.case_input.setText(review_id)
         self._log(f"검수 ID 수동 조회 완료: {review_id}")
@@ -682,10 +684,12 @@ class MainWindow(QMainWindow):
         self.review_monitor.finished.connect(self._on_review_monitor_finished)
         self.review_monitor.start()
 
-    def _on_review_selection(self, review_id: str) -> None:
-        if self._close_pending or (
-            self.worker is not None and self.worker.isRunning()
-        ):
+    def _on_review_selection(self, review_id: str, generation: int) -> None:
+        monitor = self.review_monitor
+        if (monitor is None or not monitor.is_latest(generation)
+                or self._close_pending or (
+                    self.worker is not None and self.worker.isRunning()
+                )):
             return
         if review_id != self.case_input.text().strip():
             self.case_input.setText(review_id)

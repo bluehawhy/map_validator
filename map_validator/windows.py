@@ -241,145 +241,167 @@ def _intersection_number(value: str, kind: str) -> str | None:
     return match.group(1) if match else None
 
 
+# Selection lookup handles are reused only while their owning windows exist.
+_SELECTION_WINDOW_CACHE: dict[str, int] = {}
+_SELECTION_TREE_CACHE: dict[int, list[int]] = {}
+
+
 def _read_uia_intersection(window, diagnostic=None) -> str | None:
-    """Read an accessible selected TreeItem without changing selection."""
+    """Read the Selection provider on Tree controls, not all UIA TreeItems."""
+    from pywinauto.controls.uiawrapper import UIAWrapper
+
     try:
-        tree_items = [
-            control for control in window.descendants()
-            if control.element_info.control_type == "TreeItem"
-        ]
+        trees = window.descendants(control_type="Tree")
     except Exception as exc:
-        if diagnostic is not None:
-            diagnostic(f"UIA TreeItem 열거 예외: {type(exc).__name__}: {exc}")
+        if diagnostic:
+            diagnostic(f"UIA Tree 컨트롤 조회 실패: {type(exc).__name__}: {exc}")
         return None
-    if diagnostic is not None:
-        diagnostic(f"UIA TreeItem 총 {len(tree_items)}개")
+    if diagnostic:
+        diagnostic(f"UIA Tree 컨트롤={len(trees)}개 (항목 전체 순회 안 함)")
 
-    def selected(control) -> bool:
+    for tree in trees:
         try:
-            return bool(control.is_selected())
-        except Exception:
-            pass
-        try:
-            return bool(control.iface_selection_item.CurrentIsSelected)
-        except Exception:
-            pass
-        try:
-            return bool(control.has_keyboard_focus())
-        except Exception:
-            return False
-
-    selected_items = [item for item in tree_items if selected(item)]
-    if diagnostic is not None:
-        diagnostic(f"UIA 선택 상태 표시된 TreeItem {len(selected_items)}개")
-    selected_polygon = next(
-        (
-            _intersection_number(item.window_text(), "Polygon")
-            for item in selected_items
-            if _intersection_number(item.window_text(), "Polygon") is not None
-        ),
-        None,
-    )
-    selected_link = next(
-        (item for item in selected_items
-         if _intersection_number(item.window_text(), "Link") is not None),
-        None,
-    )
-    if selected_link is None:
-        if not selected_polygon and diagnostic is not None:
-            diagnostic("UIA 선택된 Polygon/Link 없음 (선택 상태 또는 TreeItem 이름 확인)")
-        return f"Polygon {selected_polygon}" if selected_polygon else None
-
-    link_id = _intersection_number(selected_link.window_text(), "Link")
-    polygon_id = None
-    try:
-        parent = selected_link.parent()
-        for _ in range(8):
-            if parent is None:
-                break
-            polygon_id = _intersection_number(parent.window_text(), "Polygon")
-            if polygon_id:
-                break
-            parent = parent.parent()
-    except Exception:
-        pass
-    if not polygon_id:
-        try:
-            index = tree_items.index(selected_link)
-            for item in reversed(tree_items[:index]):
-                polygon_id = _intersection_number(item.window_text(), "Polygon")
-                if polygon_id:
-                    break
-        except ValueError:
-            pass
-    if not polygon_id and diagnostic is not None:
-        diagnostic("UIA Link 선택은 감지했으나 부모 Polygon을 확인하지 못함")
-    return f"Polygon {polygon_id}- Link {link_id}" if polygon_id else None
+            selections = tree.get_selection()
+        except Exception as exc:
+            if diagnostic:
+                diagnostic(f"UIA 선택 공급자 미지원: {type(exc).__name__}")
+            continue
+        for selected_element in selections:
+            try:
+                selected = UIAWrapper(selected_element)
+                label = selected.window_text()
+                polygon = _intersection_number(label, "Polygon")
+                link = _intersection_number(label, "Link")
+                if polygon:
+                    return f"Polygon {polygon}"
+                if link:
+                    parent = selected.parent()
+                    for _ in range(12):
+                        if parent is None:
+                            break
+                        polygon = _intersection_number(parent.window_text(), "Polygon")
+                        if polygon:
+                            return f"Polygon {polygon}- Link {link}"
+                        parent = parent.parent()
+            except Exception as exc:
+                if diagnostic:
+                    diagnostic(f"UIA 선택 항목 읽기 실패: {type(exc).__name__}: {exc}")
+    if diagnostic:
+        diagnostic("UIA 선택 공급자에서 유효한 Polygon/Link 선택을 찾지 못함")
+    return None
 
 
 def _read_win32_intersection(handle: int, diagnostic=None) -> str | None:
-    """Fallback for native Win32 TreeView controls inside #32770 dialogs."""
-    from pywinauto import Desktop
+    """Directly read TVGN_CARET and its Polygon ancestry; never scan all nodes."""
+    from pywinauto import Desktop, win32defines
+    from pywinauto.controls.common_controls import _treeview_element
 
+    desktop = Desktop(backend="win32")
     try:
-        window = Desktop(backend="win32").window(handle=handle).wrapper_object()
-        controls = [window, *window.descendants()]
+        window = desktop.window(handle=handle).wrapper_object()
     except Exception as exc:
-        if diagnostic is not None:
-            diagnostic(f"Win32 창/컨트롤 열거 예외: {type(exc).__name__}: {exc}")
+        if diagnostic:
+            diagnostic(f"Win32 창 연결 실패: {type(exc).__name__}: {exc}")
+        _SELECTION_TREE_CACHE.pop(handle, None)
         return None
 
-    tree_count = 0
-    inspected_count = 0
-    selected_count = 0
-    for tree in controls:
+    def selected_from_tree(tree) -> str | None:
         try:
+            chosen = tree.send_message(
+                win32defines.TVM_GETNEXTITEM, win32defines.TVGN_CARET, 0
+            )
+            if not chosen:
+                return None
+            item = _treeview_element(chosen, tree)
+            label = item.text()
+            polygon = _intersection_number(label, "Polygon")
+            if polygon:
+                return f"Polygon {polygon}"
+            link = _intersection_number(label, "Link")
+            if not link:
+                return None
+
+            # Prefer the actual native parent chain rather than assuming the
+            # preceding visual row belongs to the same Polygon.
+            current = chosen
+            for _ in range(12):
+                current = tree.send_message(
+                    win32defines.TVM_GETNEXTITEM, win32defines.TVGN_PARENT,
+                    current,
+                )
+                if not current:
+                    break
+                polygon = _intersection_number(
+                    _treeview_element(current, tree).text(), "Polygon"
+                )
+                if polygon:
+                    return f"Polygon {polygon}- Link {link}"
+
+            # Some review controls use a flat list rather than native parents.
+            # Walk only neighbouring previous siblings (bounded), not 3000
+            # nodes, and never return a Link without its Polygon.
+            current = chosen
+            for _ in range(64):
+                current = tree.send_message(
+                    win32defines.TVM_GETNEXTITEM, win32defines.TVGN_PREVIOUS,
+                    current,
+                )
+                if not current:
+                    break
+                polygon = _intersection_number(
+                    _treeview_element(current, tree).text(), "Polygon"
+                )
+                if polygon:
+                    return f"Polygon {polygon}- Link {link}"
+            if diagnostic:
+                diagnostic(f"Win32 선택 Link {link}: 상위 Polygon 확인 실패")
+        except Exception as exc:
+            if diagnostic:
+                diagnostic(f"Win32 직접 선택 조회 예외: {type(exc).__name__}: {exc}")
+        return None
+
+    # Revalidate cached tree HWNDs against the parent HWND on every read.
+    # A recreated dialog may reuse a numeric HWND but not its child handles.
+    import ctypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.IsWindow.argtypes = [ctypes.c_void_p]
+    user32.IsWindow.restype = ctypes.c_bool
+    user32.IsChild.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    user32.IsChild.restype = ctypes.c_bool
+    cached = [
+        child for child in _SELECTION_TREE_CACHE.get(handle, [])
+        if user32.IsWindow(child) and user32.IsChild(handle, child)
+    ]
+    for child in cached:
+        try:
+            tree = desktop.window(handle=child).wrapper_object()
             if tree.class_name().casefold() != "systreeview32":
                 continue
-            roots = tree.roots()
-            tree_count += 1
-            if diagnostic is not None:
-                diagnostic(f"Win32 SysTreeView32 root={len(roots)}")
+            result = selected_from_tree(tree)
+            if result:
+                if diagnostic:
+                    diagnostic("Win32 캐시 TreeView 현재 선택 직접 조회 성공")
+                return result
         except Exception:
-            continue
+            pass
 
-        # A tree node is not a native child window: inspect the Win32 TreeView
-        # item's selection state, keeping its actual Polygon ancestor.
-        stack = [(item, None) for item in reversed(roots)]
-        inspected = 0
-        last_polygon = None
-        while stack and inspected < 3000:
-            item, parent_polygon = stack.pop()
-            inspected += 1
-            inspected_count += 1
-            try:
-                label = item.text()
-                polygon_id = _intersection_number(label, "Polygon")
-                link_id = _intersection_number(label, "Link")
-                selected = item.is_selected()
-                children = item.children()
-                if selected:
-                    selected_count += 1
-            except Exception:
-                continue
-
-            # The tree is walked in display order, so this also covers flat
-            # trees where links have no native Polygon parent item.
-            if polygon_id:
-                last_polygon = polygon_id
-            if selected and link_id:
-                owner = parent_polygon or last_polygon
-                if owner:
-                    return f"Polygon {owner}- Link {link_id}"
-            if selected and polygon_id:
-                return f"Polygon {polygon_id}"
-            child_owner = polygon_id or parent_polygon
-            stack.extend((child, child_owner) for child in reversed(children))
-    if diagnostic is not None:
-        diagnostic(
-            f"Win32 선택 없음: SysTreeView32={tree_count}, "
-            f"방문노드={inspected_count}, 선택노드={selected_count}"
-        )
+    try:
+        controls = [window, *window.descendants()]
+        tree_controls = [
+            tree for tree in controls
+            if tree.class_name().casefold() == "systreeview32"
+        ]
+    except Exception as exc:
+        if diagnostic:
+            diagnostic(f"Win32 TreeView 목록 조회 실패: {type(exc).__name__}: {exc}")
+        return None
+    _SELECTION_TREE_CACHE[handle] = [int(tree.handle) for tree in tree_controls]
+    if diagnostic:
+        diagnostic(f"Win32 TreeView={len(tree_controls)}개 (TVGN_CARET 직접 조회)")
+    for tree in tree_controls:
+        result = selected_from_tree(tree)
+        if result:
+            return result
     return None
 
 
@@ -411,26 +433,39 @@ def read_selected_intersection_id(title_keyword: str, diagnostic=None) -> str:
     if not configured_key:
         raise ValueError("Intersection review window title cannot be empty")
 
-    win32_matches = []
-    try:
-        win32_matches = timed("Win32 창 목록 조회", lambda: [
-            window for window in gw.getAllWindows()
-            if configured_key in _comparable_title(window.title)
-        ])
-    except Exception:
-        pass
-
     handles = []
-    for window in win32_matches:
-        handle = int(getattr(window, "_hWnd", 0) or 0)
-        if handle and handle not in handles:
-            handles.append(handle)
+    cached_window = _SELECTION_WINDOW_CACHE.get(configured_key)
+    if cached_window:
+        try:
+            text = Desktop(backend="win32").window(
+                handle=cached_window
+            ).wrapper_object().window_text()
+            if configured_key in _comparable_title(text):
+                handles.append(cached_window)
+        except Exception:
+            pass
+    if not handles:
+        try:
+            win32_matches = timed("Win32 창 목록 조회", lambda: [
+                window for window in gw.getAllWindows()
+                if configured_key in _comparable_title(window.title)
+            ])
+            handles = list(dict.fromkeys(
+                int(getattr(window, "_hWnd", 0) or 0)
+                for window in win32_matches
+                if getattr(window, "_hWnd", 0)
+            ))
+            if handles:
+                _SELECTION_WINDOW_CACHE[configured_key] = handles[0]
+        except Exception:
+            handles = []
+
 
     if diagnostic is not None:
-        diagnostic(f"Win32 일치창={len(win32_matches)}, 유효HWND={len(handles)}")
+        diagnostic(f"Win32 일치 유효HWND={len(handles)}, 캐시조회={bool(cached_window)}")
     if handles:
-        # Native SysTreeView32 lookup is significantly cheaper than a full
-        # UI Automation descendants() scan and never changes window focus.
+        # Direct TVGN_CARET + parent-chain lookup avoids scanning thousands
+        # of items. UIA Selection is a fallback only, never a full item walk.
         for handle in handles:
             result = timed("Win32 트리 선택 조회", lambda: _read_win32_intersection(handle, diagnostic))
             if result:

@@ -77,6 +77,48 @@ class ControlWorker(QThread):
             self.case_id_ready.emit(self.case_id)
         return validate_case_id(self.case_id)
 
+    def _capture_case_id(self, *, allow_unassigned: bool) -> str | None:
+        """Verify the selected ID at capture time; never trust a stale UI ID."""
+        from map_validator.windows import read_selected_intersection_id
+
+        title = self.config.get("windows", {}).get(
+            "intersection_review_title", ""
+        ).strip()
+        self._check_stop()
+        try:
+            if not title:
+                raise ValueError("교차로 선형 검수 창 제목이 설정되지 않았습니다.")
+            current = validate_case_id(read_selected_intersection_id(
+                title,
+                diagnostic=lambda message: APP_LOG.info(
+                    "[촬영전ID] %s", message,
+                ),
+            ))
+        except Exception as exc:
+            # Wrong Polygon/Link folders are more dangerous than an
+            # unassigned raw capture. Staged captures cannot be unassigned.
+            APP_LOG.warning(
+                "촬영 전 검수 ID 최신 조회 실패: %s: %s",
+                type(exc).__name__, exc,
+            )
+            self.case_id = ""
+            self.case_id_ready.emit("")
+            if allow_unassigned:
+                return None
+            raise RuntimeError(
+                "현재 Polygon/Link 검수 ID 확인 실패: 촬영을 중단했습니다. "
+                "검수창에서 항목을 선택한 뒤 다시 시도하세요."
+            ) from exc
+        if current != self.case_id.strip():
+            APP_LOG.info(
+                "촬영 전 검수 ID 교정: 표시=%s → 실제 선택=%s",
+                self.case_id.strip() or "없음", current,
+            )
+        self.case_id = current
+        self.case_id_ready.emit(current)
+        self._check_stop()
+        return current
+
     def run(self) -> None:
         try:
             with sta_com_apartment():
@@ -96,9 +138,10 @@ class ControlWorker(QThread):
             self.config.get("output", {}).get("directory", "results")
         )
         if self.action == "capture_individual":
-            # Marker/line recognition must never depend on the slow Win32/UIA
-            # Polygon/Link lookup. A missing ID is not a failed screenshot.
-            unassigned = not bool(self.case_id.strip())
+            # Read-only selection verification prevents a delayed UI ID from
+            # placing a new capture under a previous Polygon/Link.
+            verified_id = self._capture_case_id(allow_unassigned=True)
+            unassigned = verified_id is None
             if unassigned:
                 case_id = (
                     "Unassigned_" + datetime.now(timezone.utc).strftime(
@@ -107,11 +150,11 @@ class ControlWorker(QThread):
                 )
                 folder = output_root / "_unassigned_individual" / case_id
                 APP_LOG.warning(
-                    "개별 촬영: 검수 ID 없음 · 자동 조회 없이 고유 임시 폴더로 저장: %s",
+                    "개별 촬영: 최신 검수 ID 확인 실패 · 임시 폴더에 안전 저장: %s",
                     folder.name,
                 )
             else:
-                case_id = validate_case_id(self.case_id)
+                case_id = verified_id
                 folder = output_root / case_id
             self._check_stop()
             self._progress("개별 촬영: input_tool 현재 화면 WGC 원본 저장")
@@ -144,7 +187,11 @@ class ControlWorker(QThread):
             self.result_ready.emit(result)
             return
 
-        case_id = self._resolve_case_id()
+        case_id = (
+            self._capture_case_id(allow_unassigned=False)
+            if self.action.startswith("capture_")
+            else self._resolve_case_id()
+        )
         folder = output_root / case_id
         self._check_stop()
 
