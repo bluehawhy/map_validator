@@ -11,7 +11,6 @@ import numpy as np
 
 from ..findings import unknown
 from ..line_grouping import group_line_segments
-from .local_center_line import _detect_axis_line_candidates
 
 
 def _visible_runs(
@@ -111,43 +110,60 @@ def local_lane_line_candidates(
     image: np.ndarray, point: list[float] | None, overlay: np.ndarray,
     *, roi: list[int] | None,
 ) -> dict:
-    """Return solid L groups with dashed D groups in the dashed_line field."""
+    """Return independent 20px+ solid L fragments and dashed D groups."""
     missing = unknown("빨간 기준점 또는 ROI가 확인되지 않아 흰색 차선을 분석하지 않았습니다.")
     if point is None or roi is None:
         return {**missing, "dashed_line": dict(missing)}
 
-    # Reuse the previous long-white-line detector on a scratch overlay so
-    # that provisional/short groups do not get painted as solid L markers.
-    preliminary = _detect_axis_line_candidates(
-        image, point, np.zeros_like(overlay), roi=roi, lane=True,
-    )
-    region = preliminary.get("roi")
-    if not region:
-        return {**preliminary, "dashed_line": dict(missing)}
-    x0, y0, x1, y1 = (int(v) for v in region)
+    # Field tuning: each 20px+ Hough fragment is an independent L candidate.
+    # No cross-fragment gap/offset rule is applied, so adjacent lanes cannot
+    # be merged solely because their directions match.
     height, width = image.shape[:2]
     scale = min(height, width)
+    x0, y0, x1, y1 = (int(v) for v in roi)
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(width, x1), min(height, y1)
+    if x1 <= x0 or y1 <= y0:
+        return {**unknown("흰색 차선 검색 ROI가 유효하지 않습니다."),
+                "dashed_line": dict(missing)}
+    region = [x0, y0, x1, y1]
     hsv = cv2.cvtColor(image[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
     white = cv2.inRange(hsv, (0, 0, 185), (179, 65, 255))
     white = cv2.morphologyEx(white, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
 
-    long_segments = preliminary.get("line_candidates", [])
-    long_groups = group_line_segments(
-        long_segments,
-        angle_tolerance_deg=8.0,
-        perpendicular_tolerance_px=2.5,
-        max_gap_px=12.0,
+    min_solid_span = 20
+    lines = cv2.HoughLinesP(
+        white, 1, np.pi / 180, threshold=10,
+        minLineLength=min_solid_span, maxLineGap=0,
     )
-    min_solid_span = max(48, round(scale * .075))
-    solid_gap_limit = max(7, round(scale * .012))
+    long_segments = []
+    if lines is not None:
+        for xa, ya, xb, yb in lines[:, 0]:
+            dx, dy = int(xb) - int(xa), int(yb) - int(ya)
+            length = float(np.hypot(dx, dy))
+            if length < min_solid_span:
+                continue
+            angle = float(np.degrees(np.arctan2(dy, dx)) % 180)
+            if min(angle, 180 - angle) > 18 and abs(angle - 90) > 18:
+                continue
+            long_segments.append({
+                "endpoints": [[int(xa + x0), int(ya + y0)],
+                              [int(xb + x0), int(yb + y0)]],
+                "length_px": round(length, 1),
+            })
+    long_segments.sort(key=lambda line: line["length_px"], reverse=True)
+    total_long_segments = len(long_segments)
+    long_segments = long_segments[:256]
+    for index, segment in enumerate(long_segments, 1):
+        segment["candidate_id"] = f"W{index}"
+
     solid_groups = []
-    for group in long_groups:
+    for segment in long_segments:
+        # One fragment per L candidate until real images show a safe
+        # grouping rule; offset and axial-gap are intentionally unbounded.
+        group = group_line_segments([segment])[0]
         runs, gaps, coverage = _visible_runs(white, group["endpoints"], (x0, y0))
-        if (
-            group["length_px"] >= min_solid_span
-            and coverage >= .74
-            and max(gaps, default=0) <= solid_gap_limit
-        ):
+        if group["length_px"] >= min_solid_span and coverage >= .74:
             group["coverage_ratio"] = coverage
             group["largest_gap_px"] = max(gaps, default=0)
             group["style"] = "solid"
@@ -310,21 +326,22 @@ def local_lane_line_candidates(
         "roi": region,
         "line_candidates": kept_long_segments,
         "line_groups": shown_solid,
-        "total_segments": preliminary.get("total_segments", 0),
+        "total_segments": total_long_segments,
         "shown_segments": len(kept_long_segments),
-        "omitted_segments": preliminary.get("omitted_segments", 0),
+        "omitted_segments": total_long_segments - len(long_segments),
         "group_count": len(solid_groups),
         "shown_points": len(shown_solid),
         "omitted_points": len(solid_groups) - len(shown_solid),
-        "grouping_complete": preliminary.get("grouping_complete", True),
+        "grouping_complete": total_long_segments == len(long_segments),
         "solid_groups_removed": len(solid_groups),
         "grouping_rules": {
             "minimum_solid_span_px": min_solid_span,
             "minimum_coverage_ratio": .74,
-            "maximum_visible_gap_px": solid_gap_limit,
-            "angle_tolerance_deg": 8.0,
-            "perpendicular_tolerance_px": 2.5,
-            "max_axial_gap_px": 12.0,
+            "hough_gap_px": 0,
+            "axis_tolerance_deg": 18.0,
+            "grouping_strategy": "independent_hough_segments",
+            "max_group_gap_px": None,
+            "perpendicular_tolerance_px": None,
             "mask_line_thickness_px": 3,
         },
         "dashed_line": dashed,
