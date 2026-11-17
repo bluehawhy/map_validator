@@ -352,3 +352,10 @@ AI와 Windows 제어 로직은 UI 스레드를 막지 않도록 분리합니다.
 - `map_validator/analysis/input_tool/local_stop_line.py`에서 `detect_stop_line_reference`를 삭제하고 `guide_roi`, `stop_reference` 인수와 연결된 계산을 제거한다. `local_guidance_line.py`에서도 `stop_line_y`, `stop_reference` 인수를 제거한다. `individual_capture.py`는 동일한 `point`와 `canvas_bounds`를 세 검출기에 각각 전달한다. JSON의 `stop_line_reference` 최상위 필드는 새 분석 결과에서 제거하며, 검사 목적 외부 원본 PNG와 이전 분석 이력은 보존한다.
 - 기존 S/G 및 A 공통 STOP ROI, U GUIDE, P PATH, C/W의 내부 후보 검출(`candidate_search_bounds`)은 유지한다. LINE ROI 테두리는 복구하지 않는다. 또한 정지선 검출의 선 길이 계산에서 이미지 크기 변수의 기존 불일치(`height,width` 미정의)를 `h,w`로 바로잡는다.
 - **검증 상태:** 원격 소스·호출 관계 정적 확인만 실시. Windows 현장 실행·자동 테스트 및 테스트 코드 추가는 요청받지 않아 수행하지 않았다.
+
+## 2026-11-17 중앙선 그룹화 값 직접 조정 (설정 ⚙)
+
+- 상단 **⚙ 분석 설정** 창에 기존 로드뷰 정지선 threshold와 별도로 **입력툴 노란 중앙선 선 그룹화** 항목 3개를 제공한다.
+- **기울기 차이 허용:** 기본 8°, 범위 0~30° / **같은 선상 수직거리:** 기본 5px, 범위 0~30px / **선 방향 연결 간격:** 기본 12px, 범위 0~120px. 모두 소수 첫째 자리까지 조절 가능하며 기존 공통 그룹화의 세 조건을 동시에 적용한다.
+- 저장하면 로컬 `config.yaml`의 `analysis.center_line_grouping`에 반영한다. 취소하면 이전 값을 유지하고, 기존 설정 저장 방식에 따라 백업한다. 촬영본을 **다시 분석**하면 새 기준의 C# 결과가 갱신된다. 과거 원본 PNG는 보존한다.
+- 입력툴 시안 정지선 S/G, 흰색 차선/흰색 원시 W, 유도선 U/P, 로드뷰 정지선 threshold에는 영향을 주지 않는다. 결과 JSON의 `checks.center_line.grouping_rules`와 화면 상세에서 실제 사용값을 확인할 수 있다. C# 그룹은 사람이 최종 확인할 후보이다.
