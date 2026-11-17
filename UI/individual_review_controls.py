@@ -91,7 +91,7 @@ class IndividualReviewControls(QWidget):
         layout.addWidget(self.text_toggle)
         self.details = QTextEdit()
         self.details.setReadOnly(True)
-        self.details.setPlaceholderText("분석된 정지선 S/G, 중앙선 C, 흰색 차선 L 포인트가 표시됩니다.")
+        self.details.setPlaceholderText("정지선 S/G, 중앙선 C, 흰색 실선 L과 점선 D 후보가 표시됩니다.")
         layout.addWidget(self.details, 1)
         self.text_toggle.toggled.connect(
             lambda expanded: self._toggle(self.text_toggle, self.details, "후보 분석 텍스트", expanded)

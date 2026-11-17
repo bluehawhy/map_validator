@@ -980,6 +980,8 @@ class MainWindow(QMainWindow):
             center_points = center_line.get("line_groups", [])
             lane_line = result.get("checks", {}).get("lane_line", {})
             lane_points = lane_line.get("line_groups", [])
+            dashed_lane = result.get("checks", {}).get("dashed_lane_line", {})
+            dashed_points = dashed_lane.get("line_groups", [])
             diagnostics = marker.get("diagnostics", {})
             location = result.get("location", {})
             marker_text = (
@@ -1001,7 +1003,8 @@ class MainWindow(QMainWindow):
             self.individual_status.setText(
                 f"개별 촬영 {result['revision']}회 · {marker_text} · "
                 f"{grouping_label} · 중앙선 포인트 {len(center_points)}개 "
-                f"· 차선 포인트 {len(lane_points)}개 (표시 후보) · 사람 검수 필요"
+                f"· 실선 L {len(lane_points)}개 · 점선 D {len(dashed_points)}개 "
+                f"(표시 후보) · 사람 검수 필요"
             )
             details = [
                 (
@@ -1086,9 +1089,32 @@ class MainWindow(QMainWindow):
                 details.append(
                     f"※ 차선 포인트 {lane_line['omitted_points']}개는 표시 상한으로 생략됨"
                 )
+            details.append("── 흰색 점선 후보 (D) ──")
+            details.append(f"점선: {dashed_lane.get('reason', '판단 보류')}")
+            details.append(
+                f"짧은 흰 선 조각 {dashed_lane.get('shown_segments', 0)}/"
+                f"{dashed_lane.get('total_segments', 0)}개, "
+                f"점선 포인트 {dashed_lane.get('shown_points', 0)}/"
+                f"{dashed_lane.get('group_count', 0)}개 (실제 차선 수 아님)"
+            )
+            details.append(
+                f"점선 그룹화 기준: {dashed_lane.get('grouping_rules', '미확인')}"
+            )
+            for group in dashed_points:
+                details.append(
+                    f"  {group['group_id']}: 포인트 {group['point']}px · "
+                    f"방향 {group['orientation']} ({group['angle_deg']:.1f}°) · "
+                    f"공백 구간 {group.get('gaps_px', [])}px · "
+                    f"반복 조각 {group.get('dash_count', '미확인')}개 · "
+                    f"구성 {', '.join(group['member_ids'])}"
+                )
+            if dashed_lane.get('omitted_points', 0):
+                details.append(
+                    f"※ 점선 포인트 {dashed_lane['omitted_points']}개 표시 상한 생략"
+                )
             details.extend([
                 "※ 선 후보는 정지선 확정이 아닙니다. 횡단보도/도로 경계를 구별하세요.",
-                "※ 흰색 차선 포인트는 실제 차선 개수나 차로 수를 확정하지 않습니다.",
+                "※ 실선 L·점선 D 포인트는 실제 차선 개수나 차로 수를 확정하지 않습니다.",
                 "※ 노란 선/포인트는 중앙선 검수용 후보이며 실제 중앙선 2개·4개를 확정하지 않습니다.",
                 f"원본: {result['input_tool_image']}",
                 f"근거: {result['input_tool_overlay']}",

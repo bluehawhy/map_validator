@@ -156,3 +156,10 @@ output.directory/
 - `map_validator/analysis/input_tool/local_lane_line.py`: 흰색 마스크를 선택하는 차선 후보 진입점
 - `map_validator/individual_capture.py`: 개별 촬영 재분석 시 `checks.lane_line` 기록과 오버레이 생성
 - `UI/app.py`: L# 후보 개수·픽셀 좌표·그룹 구성 표시
+
+## 2026-11-17 흰색 차선 실선 우선·점선 분리 탐지
+
+- `analysis/input_tool/local_lane_line.py`: 기존 중앙선/흰색 차선의 공통 긴 선 검출기를 이용해 실선 L 그룹을 선별하고, 수용한 실선 부분을 제외한 마스크에서 짧은 흰색 점선을 D 그룹으로 탐지한다.
+- `analysis/line_grouping.py`: 실선/점선 모두 공통 기울기·동일 선상 그룹화 로직을 재사용한다.
+- `individual_capture.py`: 선택한 원본 재분석 시 `checks.lane_line`과 `checks.dashed_lane_line`를 분리 기록하고 동일 오버레이에 후보 포인트를 그린다.
+- `UI/app.py`: 후보 분석 텍스트에 실선 L 및 점선 D의 그룹·간격·좌표를 표시한다. 원본 PNG 보존과 개별 촬영 목록 정책은 유지한다.
