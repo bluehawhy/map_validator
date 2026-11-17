@@ -215,7 +215,7 @@ class MainWindow(QMainWindow):
         self.settings_btn = QPushButton("⚙")
         self.settings_btn.setObjectName("header_button")
         self.settings_btn.setFixedSize(25, 23)
-        self.settings_btn.setToolTip("분석 설정 · 로드뷰 정지선 threshold")
+        self.settings_btn.setToolTip("분석 설정 · 정지선 threshold / 중앙선 그룹화")
         self.settings_btn.clicked.connect(self._show_analysis_settings)
         header_layout.addWidget(self.settings_btn)
         for label, callback, tooltip in (
@@ -536,11 +536,13 @@ class MainWindow(QMainWindow):
             field.setValue(self.center_line_grouping_values[key])
             form.addWidget(field)
             center_controls[key] = field
-        form.addWidget(self._label(
+        grouping_hint = self._label(
             "세 조건을 모두 만족할 때만 선 조각을 묶습니다. "
             "평행한 별도 중앙선은 합치지 않도록 선상 거리를 확인합니다. "
             "저장 후 기존 촬영본을 다시 분석하면 적용됩니다.", "hint"
-        ))
+        )
+        grouping_hint.setWordWrap(True)
+        form.addWidget(grouping_hint)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save |
             QDialogButtonBox.StandardButton.Cancel,
