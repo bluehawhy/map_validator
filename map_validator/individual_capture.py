@@ -18,6 +18,9 @@ from .analysis.input_tool.local_stop_line import (
     local_stop_line_candidates, paint_stop_line_roi_border,
 )
 from .analysis.input_tool.local_center_line import local_center_line_candidates
+from .analysis.input_tool.local_guidance_line import (
+    local_guidance_line_candidates, paint_guidance_roi_border,
+)
 from .analysis.input_tool.local_white_marking import local_white_marking_candidates
 from .analysis.input_tool.local_ui_text import (
     fixed_ui_text_exclusion, paint_ui_text_exclusion,
@@ -268,9 +271,19 @@ def capture_and_analyze(
         excluded_objects=["fixed_ui_status_text", "road_arrow_green_framed_region"],
     )
     paint_arrow_candidates(overlay, road_arrows)
-    # Paint the exact detection boundary after all candidate overlays so
-    # the inspector can always see the current-position-based ROI.
+    guide_lines = local_guidance_line_candidates(
+        input_tool_image, point, overlay, stop_roi=stop_line.get("roi"),
+    )
+    APP_LOG.info(
+        "[개별촬영][유도선] 연결그룹 U=%s 색상별=%s ROI=%s",
+        guide_lines.get("group_count", 0),
+        guide_lines.get("color_counts", {}),
+        guide_lines.get("roi"),
+    )
+    # Final overlay pass: the two measured ROI outlines stay visible
+    # above every S/G, C, A, W and U candidate annotation.
     paint_stop_line_roi_border(overlay, stop_line)
+    paint_guidance_roi_border(overlay, guide_lines)
     APP_LOG.info(
         "[개별촬영][UI문자] 제외영역=%s 흰색제외픽셀=%s 원본W=%s 문자제외후W=%s",
         [r.get("bbox") for r in ui_text.get("regions", [])],
@@ -369,6 +382,7 @@ def capture_and_analyze(
             "road_id": None, "angle_deg": None, "heading_deg": None,
         },
         "checks": {"stop_line": stop_line, "center_line": center_line,
+                   "guidance_lines": guide_lines,
                    "ui_text_exclusion": ui_text, "road_arrows": road_arrows,
                    "white_marking_candidates_raw": raw_white,
                    "white_marking_candidates_after_ui": after_ui,
@@ -376,7 +390,7 @@ def capture_and_analyze(
         "human_review": "requires_human_review",
         "warning": (
             "빨간 표시는 현재 사용자 위치의 화면 좌표 후보입니다. 실제 지도 좌표·진행 방향은 "
-            "추정하지 않습니다. 정지선·중앙선·노면화살표 A 및 흰색 W 후보는 사람 검수가 필요합니다."
+            "추정하지 않습니다. 정지선·중앙선·유도선 U·노면화살표 A 및 흰색 W 후보는 사람 검수가 필요합니다."
         ),
     }
     history_path = folder / f"individual_analysis_r{revision:03d}.json"

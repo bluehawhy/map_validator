@@ -982,6 +982,8 @@ class MainWindow(QMainWindow):
             stop = result.get("checks", {}).get("stop_line", {})
             center_line = result.get("checks", {}).get("center_line", {})
             center_points = center_line.get("line_groups", [])
+            guide = result.get("checks", {}).get("guidance_lines", {})
+            guide_groups = guide.get("groups", [])
             arrow_candidates = result.get("checks", {}).get("road_arrows", {})
             arrow_items = arrow_candidates.get("candidates", [])
             original_white = result.get("checks", {}).get("white_marking_candidates_raw")
@@ -1018,7 +1020,7 @@ class MainWindow(QMainWindow):
             self.individual_status.setText(
                 f"개별 촬영 {result['revision']}회 · {marker_text} · "
                 f"{grouping_label} · 중앙선 포인트 {len(center_points)}개 "
-                f"· {white_status} · 사람 검수 필요"
+                f"· 유도선 U {len(guide_groups)}개 · {white_status} · 사람 검수 필요"
             )
             details = [
                 (
@@ -1087,6 +1089,27 @@ class MainWindow(QMainWindow):
             if center_line.get('omitted_points', 0):
                 details.append(
                     f"※ 중앙선 포인트 {center_line['omitted_points']}개는 표시 상한으로 생략됨"
+                )
+            details.append("── 유도선 색상 연결 그룹 (U · 검수 필요) ──")
+            details.append(
+                f"유도선: {guide.get('reason', '과거 기록 또는 분석 보류')}"
+            )
+            details.append(
+                f"GUIDE ROI: {guide.get('roi', '미확인')} · "
+                f"후보 그룹 {guide.get('group_count', 0)}개 · "
+                f"색상별 {guide.get('color_counts', {})}"
+            )
+            details.append(
+                f"색상표: {guide.get('palette', '미확인')} · "
+                f"그룹 기준: {guide.get('grouping', '미확인')}"
+            )
+            for group in guide_groups:
+                details.append(
+                    f"  {group['group_id']}: {group['label']} "
+                    f"RGB {group['color_rgb']} · 중심 {group['point']}px · "
+                    f"외곽 {group['bbox']} · 연결 영역 "
+                    f"{group['connected_pixels']}px · 실제 색상 픽셀 "
+                    f"{group['original_color_pixels']}px"
                 )
             if road_arrows := (arrow_candidates if arrow_candidates else None):
                 details.append("── 노면화살표 검출 후보 (A · 검수 필요) ──")
@@ -1186,6 +1209,7 @@ class MainWindow(QMainWindow):
                 "※ 선 후보는 정지선 확정이 아닙니다. 횡단보도/도로 경계를 구별하세요.",
                 "※ A는 회색/초록/흰색으로 검출한 화살표 후보이며, 제외 전 W는 JSON에 보존합니다. 최종 판정은 수동입니다.",
                 "※ 노란 선/포인트는 중앙선 검수용 후보이며 실제 중앙선 2개·4개를 확정하지 않습니다.",
+                "※ U#는 같은 색상으로 연결된 그림의 집합이며 실제 유도선 개수나 경로를 확정하지 않습니다.",
                 f"원본: {result['input_tool_image']}",
                 f"근거: {result['input_tool_overlay']}",
                 f"후보 미리보기: {result.get('input_tool_focus', '없음')}",
