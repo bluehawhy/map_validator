@@ -97,8 +97,8 @@ def local_stop_line_candidates(
         mid_x = round((a[0] + b[0]) / 2)
         mid_y = round((a[1] + b[1]) / 2)
         for dx, dy in ((8, -10), (-tw - 8, -10), (8, 24), (-tw - 8, 24), (8, -32)):
-            tx = max(2, min(mid_x + dx, width - tw - 7))
-            ty = max(th + 5, min(mid_y + dy, height - baseline - 5))
+            tx = max(2, min(mid_x + dx, w - tw - 7))
+            ty = max(th + 5, min(mid_y + dy, h - baseline - 5))
             box = (tx - 3, ty - th - 3, tx + tw + 3, ty + baseline + 3)
             if not any(not (
                 box[2] < prev[0] or box[0] > prev[2]
@@ -127,8 +127,8 @@ def local_stop_line_candidates(
         # Keep G# labels clear of the S# labels already placed on the image.
         for dx, dy in ((12, -28), (-tw - 12, -28), (12, 40),
                        (-tw - 12, 40), (20, -55), (-tw - 20, 65)):
-            x = max(4, min(center_x + dx, width - tw - 6))
-            y = max(th + 6, min(center_y + dy, height - baseline - 5))
+            x = max(4, min(center_x + dx, w - tw - 6))
+            y = max(th + 6, min(center_y + dy, h - baseline - 5))
             box = (x - 4, y - th - 4, x + tw + 4, y + baseline + 4)
             if not any(not (
                 box[2] < prev[0] or box[0] > prev[2]

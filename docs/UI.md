@@ -370,3 +370,10 @@ AI와 Windows 제어 로직은 UI 스레드를 막지 않도록 분리합니다.
 - 분석 결과 `checks.center_line.second_pass_diagnostics.pair_comparisons`에는 **비교한 모든 CG 쌍의 좌표, 끝점 직선거리, 기울기 차이, 수직거리, 각 허용값, PASS/FAIL, 제외 사유, 최종 C 그룹**을 남긴다. `accepted_connections`, `rejected_pairs_by_reason` 등 요약도 기록한다.
 - 작업 로그에는 전체 집계, 모든 PASS 및 **가장 가까운 FAIL 20쌍**을 기록하고, UI 결과 상세에는 PASS 및 가까운 FAIL 15쌍을 표시한다. 전체 비교는 분석 JSON에서 확인한다. '정지선 분석'을 다시 실행해야 새 설정을 반영한다.
 - 정지선 S/G 및 흰색 W 후보 로직은 변경하지 않는다. JSON PASS/FAIL은 **선 조각의 연결 적합성**만 뜻하며 도로 검수 승인 판정이 아니다. Windows 현장 이미지 분석과 자동 테스트는 요청받지 않아 미실행이다.
+
+## 2026-11-18 정지선 후보 라벨 경계 변수 오류 수정
+
+- `map_validator/analysis/input_tool/local_stop_line.py`의 개별 촬영 정지선 후보 S/G 라벨 표시 과정에서 미정의 `width`, `height` 참조로 `NameError`가 발생하여 이후 중앙선 1차·2차 분석이 실행되지 못하는 문제를 수정한다.
+- 함수 상단에서 선언한 이미지 크기 `h, w`를 S/G 라벨 경계 계산에서도 동일하게 사용한다. ROI, 검출 임계값, 후보 그룹화, 원본 PNG 및 다른 검출기 동작은 변경하지 않는다.
+- 오류로 기존 분석 JSON과 근거 이미지가 남아 있었을 수 있다. 최신 코드를 받아 같은 촬영본의 **정지선 분석**을 다시 실행하면 새 결과로 갱신된다.
+- Windows 현장 실행 및 자동 테스트는 요청되지 않아 진행하지 않았다.
