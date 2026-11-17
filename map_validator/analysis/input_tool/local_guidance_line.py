@@ -114,6 +114,7 @@ def _connected_groups(
         )
         candidates.append({
             "color": name,
+            "label": settings["colors"][name]["label"],
             "color_rgb": list(settings["colors"][name]["rgb"]),
             "point": hit,
             "bbox": [x0+x, y0+y, x0+x+w, y0+y+h],
@@ -127,6 +128,7 @@ def _connected_groups(
     stroke = (235, 85, 210) if name == "guidance" else (220, 190, 135)
     for i, item in enumerate(candidates, 1):
         item["candidate_id"] = f"{identifier}{i}"
+        item["group_id"] = item["candidate_id"]  # old UI/JSON key compatibility
         _paint_candidate(
             overlay, item, item.pop("_contours"),
             item.pop("_origin"), stroke,
@@ -146,6 +148,7 @@ def _connected_groups(
         "roi": roi, "roi_rules": dict(scope),
         "palette_source": "color_ranges.json.blue_markings",
         "color_rgb": list(settings["colors"][name]["rgb"]),
+        "palette": {name: list(settings["colors"][name]["rgb"])},
         "color_tolerance_per_channel": int(settings["tolerance_per_channel"]),
         "excluded_outline_blue_pixels": pure_blue_excluded,
         "grouping": "8-connected RGB pixels with 3x3 morphological close",
