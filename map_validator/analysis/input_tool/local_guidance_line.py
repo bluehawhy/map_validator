@@ -77,7 +77,10 @@ def _connected_groups(
     if point is None or stop_roi is None or len(stop_roi) != 4:
         return _unknown("현재 위치 또는 HDL View 기준 분석 ROI 미확인", name)
     settings = blue_palette()
-    scope = settings[f"{name}_roi"]
+    # The approach-path colour key is "approach_path", but its ROI setting
+    # is named "approach_roi". Keep the lookup explicit for both detectors.
+    roi_keys = {"guidance": "guidance_roi", "approach_path": "approach_roi"}
+    scope = settings[roi_keys[name]]
     roi = _vehicle_roi(image, point, stop_roi, scope)
     if roi is None:
         return _unknown("차량 기준 검출 범위가 유효하지 않습니다.", name)
