@@ -57,7 +57,6 @@ def local_stop_line_candidates(
             },
         }
     roi = image[y0:y1, x0:x1]
-    cv2.rectangle(overlay, (x0, y0), (x1 - 1, y1 - 1), (0, 145, 255), 2)
 
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     cyan = cv2.inRange(hsv, (78, 105, 120), (102, 255, 255))
@@ -185,3 +184,55 @@ def local_stop_line_candidates(
             "requires_overlap_or_short_gap": True,
         },
     }
+
+
+
+def paint_stop_line_roi_border(overlay: np.ndarray, result: dict) -> None:
+    """Draw the precise current-position stop-line search rectangle last.
+
+    Rendering after all S/G, C, A and W candidate annotations makes the
+    boundary visible even where roads or candidate labels cross the edge.
+    This is a visual guide only; it never changes which pixels are analyzed.
+    """
+    bounds = result.get("roi")
+    if not bounds or len(bounds) != 4:
+        return  # HDL View/marker not found: never invent a search boundary
+
+    height, width = overlay.shape[:2]
+    x0, y0, x1, y1 = (int(v) for v in bounds)
+    x0, y0, x1, y1 = (
+        max(0, x0), max(0, y0), min(width, x1), min(height, y1)
+    )
+    if x1 <= x0 or y1 <= y0:
+        return
+
+    # Dark halo keeps the orange border distinguishable from the colored
+    # map geometry; do not fill or dim the area being inspected.
+    cv2.rectangle(
+        overlay, (x0, y0), (x1 - 1, y1 - 1),
+        (16, 16, 16), 5, cv2.LINE_AA,
+    )
+    cv2.rectangle(
+        overlay, (x0, y0), (x1 - 1, y1 - 1),
+        (0, 165, 255), 2, cv2.LINE_AA,
+    )
+
+    label = "STOP ROI"
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale, thickness = .58, 2
+    (tw, th), baseline = cv2.getTextSize(label, font, scale, thickness)
+    # Place the label just within the exact search boundary so the evidence
+    # crop includes it, even near the right/bottom image edge.
+    tx = min(x0 + 8, max(x0 + 2, x1 - tw - 6))
+    ty = min(y0 + th + 10, y1 - baseline - 3)
+    if ty - th - 4 > y0 and tx + tw + 3 < x1:
+        cv2.rectangle(
+            overlay,
+            (tx - 4, ty - th - 4),
+            (tx + tw + 4, ty + baseline + 4),
+            (17, 17, 17), -1,
+        )
+        cv2.putText(
+            overlay, label, (tx, ty),
+            font, scale, (0, 165, 255), thickness, cv2.LINE_AA,
+        )

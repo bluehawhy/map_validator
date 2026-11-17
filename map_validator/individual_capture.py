@@ -14,7 +14,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .analysis.input_tool.local_stop_line import local_stop_line_candidates
+from .analysis.input_tool.local_stop_line import (
+    local_stop_line_candidates, paint_stop_line_roi_border,
+)
 from .analysis.input_tool.local_center_line import local_center_line_candidates
 from .analysis.input_tool.local_white_marking import local_white_marking_candidates
 from .analysis.input_tool.local_ui_text import (
@@ -266,6 +268,9 @@ def capture_and_analyze(
         excluded_objects=["fixed_ui_status_text", "road_arrow_green_framed_region"],
     )
     paint_arrow_candidates(overlay, road_arrows)
+    # Paint the exact detection boundary after all candidate overlays so
+    # the inspector can always see the current-position-based ROI.
+    paint_stop_line_roi_border(overlay, stop_line)
     APP_LOG.info(
         "[개별촬영][UI문자] 제외영역=%s 흰색제외픽셀=%s 원본W=%s 문자제외후W=%s",
         [r.get("bbox") for r in ui_text.get("regions", [])],
