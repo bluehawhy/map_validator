@@ -349,9 +349,11 @@
 - 기존 S/G 및 A 공통 STOP ROI, U GUIDE, P PATH, C/W의 내부 후보 검출(`candidate_search_bounds`)은 유지한다. LINE ROI 테두리는 복구하지 않는다. 또한 정지선 검출의 선 길이 계산에서 이미지 크기 변수의 기존 불일치(`height,width` 미정의)를 `h,w`로 바로잡는다.
 - **검증 상태:** 원격 소스·호출 관계 정적 확인만 실시. Windows 현장 실행·자동 테스트 및 테스트 코드 추가는 요청받지 않아 수행하지 않았다.
 
+
 ## 2026-11-17 입력툴 중앙선 그룹화 현장 보정 설정
 
-- 개별 저장 촬영본의 **노란 중앙선 C# 그룹 후보**는 기존 `group_line_segments`를 재사용하며 기울기 차이, 수직거리, 선 방향 연결 간격 세 기준을 동시에 적용한다. 같은 기울기라도 떨어진 평행한 다른 선을 그룹으로 자동 병합하지 않는다.
-- 중앙선 그룹화의 현장 보정값은 `analysis.center_line_grouping` 아래 `angle_tolerance_deg`(기본 8°, 허용 0~30°), `perpendicular_tolerance_px`(기본 5px, 허용 0~30px), `max_gap_px`(기본 12px, 허용 0~120px)이다.
-- 사용자가 상단 톱니바퀴 설정에서 변경·저장한 값은 다음 **개별 촬영본 분석**부터 적용하며, 해당 결과의 `checks.center_line.grouping_rules`에 실제 적용된 값을 남긴다. 기존 촬영 PNG나 정지선/흰선의 그룹화 임계값, 현재 선택 Polygon/Link 식별자는 변경하거나 함께 저장하지 않는다.
-- 수치 변경으로 하나의 물리적 중앙선이 여러 C 후보로 분리되거나 다른 선이 잘못 합쳐질 수 있다. **검수 보조 후보**이며 실제 중앙선 수·도로 판정으로 자동 확정하지 않는다. Windows 현장 검증 및 테스트는 별도 요청 전 수행하지 않는다.
+- 노란 중앙선은 **1차 기존 분석(Y 조각 → CG 그룹)**과 **2차 사용자 설정값으로 재그룹화(CG 그룹 → C 그룹)**로 분리한다. 1차는 기울기 8°, 수직거리 5px, 연결 간격 12px 고정이며 조정값이 개입하지 않는다.
+- 2차는 기존 공통 `group_line_segments`의 기울기·같은 선상 거리·투영 구간 간격 조건을 1차 대표 선분끼리 적용한다. 같은 기울기라도 떨어진 평행선은 거리 조건으로 구분한다. 2차는 병합만 수행하므로 1차 그룹 내부를 분할하지 않는다.
+- 2차 현장 보정값은 `analysis.center_line_grouping` 아래 `angle_tolerance_deg`(기본 8°, 허용 0~30°), `perpendicular_tolerance_px`(기본 5px, 허용 0~30px), `max_gap_px`(기본 12px, 허용 0~120px)이다.
+- 상단 톱니바퀴 설정에서 변경·저장한 값은 다음 **개별 촬영본 정지선 분석**에서만 적용한다. 결과 `checks.center_line`은 1차 `first_pass_line_groups` / `first_pass_group_count`, 2차 `line_groups` / `second_pass_group_count`, 실제 사용 조건 `grouping_rules.first_pass/second_pass` 및 원본 Y 번호 연계를 남긴다. 기존 PNG, 다른 검출기 기준, Polygon/Link ID는 변경하지 않는다.
+- 설정을 넓히면 인접한 물리적 중앙선이 잘못 합쳐질 수 있다. 최종 C 후보 수를 실제 중앙선 수로 확정하지 않고 사용자 검수를 유지한다. Windows 현장 검증과 테스트는 별도 요청 전 수행하지 않는다.

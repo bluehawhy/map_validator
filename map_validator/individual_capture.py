@@ -268,10 +268,12 @@ def capture_and_analyze(
     paint_guidance_roi_border(overlay,guide_lines)
     paint_approach_roi_border(overlay,approach_paths)
     APP_LOG.info(
-        "[개별촬영][중앙선] 노란조각=%s 포인트후보=%s ROI=%s 그룹화=%s",
-        center_line.get("total_segments",0),
-        center_line.get("shown_points",0),center_line.get("roi"),
-        center_line.get("grouping_rules"),
+        "[개별촬영][중앙선] 노란조각=%s 1차그룹=%s 2차그룹=%s ROI=%s 2차설정=%s",
+        center_line.get("total_segments", 0),
+        center_line.get("first_pass_group_count", 0),
+        center_line.get("second_pass_group_count", 0),
+        center_line.get("roi"),
+        center_line.get("grouping_rules", {}).get("second_pass"),
     )
     APP_LOG.info(
         "[개별촬영][유도선/경로] U=%s P=%s",

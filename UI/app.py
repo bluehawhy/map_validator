@@ -518,7 +518,7 @@ class MainWindow(QMainWindow):
             "높을수록 엄격하게 판정하며, 판단 보류가 늘어날 수 있습니다. "
             "횡단보도는 정지선으로 판정하지 않습니다.", "hint"
         ))
-        form.addWidget(self._label("입력툴 노란 중앙선 · 선 그룹화", "section"))
+        form.addWidget(self._label("입력툴 노란 중앙선 · 2차 그룹화", "section"))
         center_controls = {}
         center_fields = (
             ("angle_tolerance_deg", "기울기 차이 허용 (°)", " °", 0.5),
@@ -537,8 +537,9 @@ class MainWindow(QMainWindow):
             form.addWidget(field)
             center_controls[key] = field
         grouping_hint = self._label(
-            "세 조건을 모두 만족할 때만 선 조각을 묶습니다. "
-            "평행한 별도 중앙선은 합치지 않도록 선상 거리를 확인합니다. "
+            "1차는 고정 기준(8° / 5px / 12px)으로 묶고, "
+            "2차에서만 아래 설정값으로 1차 그룹들을 다시 병합합니다. "
+            "2차에서는 1차 그룹을 더 잘게 분할하지 않습니다. "
             "저장 후 기존 촬영본을 다시 분석하면 적용됩니다.", "hint"
         )
         grouping_hint.setWordWrap(True)
@@ -568,7 +569,7 @@ class MainWindow(QMainWindow):
                     self._log(f"로드뷰 정지선 threshold 변경: {value:.2f}")
                 if changed_grouping:
                     self._log(
-                        "입력툴 중앙선 그룹화 기준 변경: "
+                        "입력툴 중앙선 2차 그룹화 기준 변경: "
                         f"기울기 ±{grouping['angle_tolerance_deg']:.1f}° · "
                         f"수직거리 {grouping['perpendicular_tolerance_px']:.1f}px · "
                         f"연결 간격 {grouping['max_gap_px']:.1f}px "
@@ -1070,7 +1071,9 @@ class MainWindow(QMainWindow):
             )
             self.individual_status.setText(
                 f"개별 촬영 {result['revision']}회 · {marker_text} · "
-                f"{grouping_label} · 중앙선 포인트 {len(center_points)}개 "
+                f"{grouping_label} · 중앙선 1차 "
+                f"{center_line.get('first_pass_group_count', '미확인')}개 "
+                f"→ 2차 포인트 {len(center_points)}개 "
                 f"· 유도선 U {len(guide_groups)}개 · 진입 경로 P {len(path_groups)}개 "
                 f"· {white_status} · 사람 검수 필요"
             )
@@ -1132,8 +1135,18 @@ class MainWindow(QMainWindow):
                 f"중앙선: {center_line.get('reason', '판단 보류')}"
             )
             details.append(
+                "중앙선 그룹화: "
+                f"1차 {center_line.get('first_pass_group_count', '미확인')}개 → "
+                f"2차 {center_line.get('second_pass_group_count', center_line.get('group_count', 0))}개"
+            )
+            details.append(
                 f"중앙선 그룹화 기준: {center_line.get('grouping_rules', '미확인')}"
             )
+            for first_group in center_line.get('first_pass_line_groups', []):
+                details.append(
+                    f"  1차 {first_group['group_id']}: "
+                    f"{', '.join(first_group['member_ids'])}"
+                )
             details.append(
                 f"노란 선 조각 {center_line.get('shown_segments', 0)}/"
                 f"{center_line.get('total_segments', 0)}개, "
@@ -1144,7 +1157,9 @@ class MainWindow(QMainWindow):
                 details.append(
                     f"  {group['group_id']}: 포인트 {group['point']}px · "
                     f"방향 {group['orientation']} ({group['angle_deg']:.1f}°) · "
-                    f"길이 {group['length_px']:.1f}px · 조각 {', '.join(group['member_ids'])}"
+                    f"길이 {group['length_px']:.1f}px · "
+                    f"1차 그룹 {', '.join(group.get('first_pass_group_ids', [])) or '미확인'} · "
+                    f"조각 {', '.join(group['member_ids'])}"
                 )
             if center_line.get('omitted_points', 0):
                 details.append(

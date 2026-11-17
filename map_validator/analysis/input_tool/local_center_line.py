@@ -83,14 +83,41 @@ def _detect_axis_line_candidates(
     for idx, segment in enumerate(segments, 1):
         segment["candidate_id"] = f"{'W' if lane else 'Y'}{idx}"
 
-    # Different visible parallel lines should not merge on slope alone.
-    # Only yellow centre-line tolerances are adjustable through the UI.
-    grouping = (
-        {"angle_tolerance_deg": 8.0, "perpendicular_tolerance_px": 2.5,
-         "max_gap_px": 12.0}
-        if lane else normalize_center_line_grouping(grouping_rules)
-    )
-    groups = group_line_segments(segments, **grouping)
+    # 1차: preserve the original fixed-parameter fragment grouping.
+    # User-adjustable thresholds do not change the raw-fragment groups.
+    first_pass_rules = {
+        "angle_tolerance_deg": 8.0,
+        "perpendicular_tolerance_px": 2.5 if lane else 5.0,
+        "max_gap_px": 12.0,
+    }
+    first_pass_groups = group_line_segments(segments, **first_pass_rules)
+    if lane:
+        groups = first_pass_groups  # Keep white line behavior unchanged.
+        grouping = first_pass_rules
+    else:
+        # 2차: regroup first-pass representative segments with UI settings.
+        grouping = normalize_center_line_grouping(grouping_rules)
+        for idx, group in enumerate(first_pass_groups, 1):
+            group["group_id"] = f"CG{idx}"
+            a, b = group["endpoints"]
+            group["point"] = [round((a[0] + b[0]) / 2, 1),
+                              round((a[1] + b[1]) / 2, 1)]
+        first_by_id = {group["group_id"]: group for group in first_pass_groups}
+        representatives = [
+            {"candidate_id": group["group_id"], "endpoints": group["endpoints"]}
+            for group in first_pass_groups
+        ]
+        groups = group_line_segments(representatives, **grouping)
+        for group in groups:
+            first_ids = list(group["member_ids"])
+            source_ids = [
+                original_id for first_id in first_ids
+                for original_id in first_by_id[first_id]["member_ids"]
+            ]
+            group["first_pass_group_ids"] = first_ids
+            group["first_pass_group_count"] = len(first_ids)
+            group["member_ids"] = source_ids
+            group["member_count"] = len(source_ids)
     for idx, group in enumerate(groups, 1):
         group["group_id"] = f"{'L' if lane else 'C'}{idx}"
         a, b = group["endpoints"]
@@ -100,6 +127,13 @@ def _detect_axis_line_candidates(
               for group in groups for name in group["member_ids"]}
     for segment in segments:
         segment["group_id"] = lookup[segment["candidate_id"]]
+    if not lane:
+        first_lookup = {
+            name: group["group_id"]
+            for group in first_pass_groups for name in group["member_ids"]
+        }
+        for segment in segments:
+            segment["first_pass_group_id"] = first_lookup[segment["candidate_id"]]
 
     # Paint group-level representative points, not one marker per Hough
     # fragment; show a limited number to keep the stop-line overlay legible.
@@ -131,7 +165,7 @@ def _detect_axis_line_candidates(
         "value": None,
         "confidence": None,
         "method": ("local_white_axis_lines_grouped_points_v1" if lane else
-                   "local_yellow_axis_lines_grouped_points_v1"),
+                   "local_yellow_axis_lines_grouped_points_v2_two_pass"),
         "reason": (f"{marking} 수평/수직 선 그룹의 중간점을 표시했습니다. "
                    "실제 차선/중앙선 여부와 개수는 사람 검수가 필요합니다."
                    if groups else
@@ -147,10 +181,19 @@ def _detect_axis_line_candidates(
         "shown_points": len(shown),
         "omitted_points": len(groups) - len(shown),
         "grouping_complete": total_segments == len(segments),
+        "first_pass_group_count": len(first_pass_groups),
+        "first_pass_line_groups": first_pass_groups if not lane else [],
+        "second_pass_group_count": len(groups),
         "grouping_rules": {
             "angle_tolerance_deg": grouping["angle_tolerance_deg"],
             "perpendicular_tolerance_px": grouping["perpendicular_tolerance_px"],
             "max_axial_gap_px": grouping["max_gap_px"],
             "axis_tolerance_deg": 18.0,
+            "strategy": (
+                "fixed_first_pass_then_configured_second_pass"
+                if not lane else "single_pass"
+            ),
+            "first_pass": first_pass_rules if not lane else None,
+            "second_pass": grouping if not lane else None,
         },
     }
