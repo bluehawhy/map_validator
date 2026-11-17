@@ -523,7 +523,7 @@ class MainWindow(QMainWindow):
         center_fields = (
             ("angle_tolerance_deg", "기울기 차이 허용 (°)", " °", 0.5),
             ("perpendicular_tolerance_px", "같은 선상 수직거리 (px)", " px", 0.5),
-            ("max_gap_px", "선 방향 연결 간격 (px)", " px", 1.0),
+            ("max_gap_px", "끝점 연결 거리 (px)", " px", 1.0),
         )
         for key, label, suffix, step in center_fields:
             form.addWidget(self._label(label))
@@ -537,10 +537,10 @@ class MainWindow(QMainWindow):
             form.addWidget(field)
             center_controls[key] = field
         grouping_hint = self._label(
-            "1차는 고정 기준(8° / 5px / 12px)으로 묶고, "
-            "2차에서만 아래 설정값으로 1차 그룹들을 다시 병합합니다. "
-            "2차에서는 1차 그룹을 더 잘게 분할하지 않습니다. "
-            "저장 후 기존 촬영본을 다시 분석하면 적용됩니다.", "hint"
+            "1차는 고정 기준(8° / 5px / 12px) 그대로 유지합니다. "
+            "2차에서는 기울기·선상 거리·끝점 XY 거리로 CG 그룹을 "
+            "반복 연결합니다. 기존에 저장한 최대값은 유지됩니다. "
+            "저장 후 정지선 분석을 다시 누르면 적용됩니다.", "hint"
         )
         grouping_hint.setWordWrap(True)
         form.addWidget(grouping_hint)
@@ -572,7 +572,7 @@ class MainWindow(QMainWindow):
                         "입력툴 중앙선 2차 그룹화 기준 변경: "
                         f"기울기 ±{grouping['angle_tolerance_deg']:.1f}° · "
                         f"수직거리 {grouping['perpendicular_tolerance_px']:.1f}px · "
-                        f"연결 간격 {grouping['max_gap_px']:.1f}px "
+                        f"끝점 연결 거리 {grouping['max_gap_px']:.1f}px "
                         "(다음 개별 촬영본 분석부터 적용)"
                     )
 
@@ -1142,6 +1142,49 @@ class MainWindow(QMainWindow):
             details.append(
                 f"중앙선 그룹화 기준: {center_line.get('grouping_rules', '미확인')}"
             )
+            merge_diagnostics = center_line.get("second_pass_diagnostics") or {}
+            if merge_diagnostics:
+                details.append(
+                    "── 중앙선 2차 그룹 비교 ──"
+                )
+                details.append(
+                    f"전체 쌍 {merge_diagnostics.get('candidate_pairs', 0)}개 / "
+                    f"조건 통과 {merge_diagnostics.get('eligible_pairs', 0)}개 / "
+                    f"실제 병합 {merge_diagnostics.get('accepted_connection_count', 0)}개"
+                )
+                details.append(
+                    f"병합 제외 사유별 수: "
+                    f"{merge_diagnostics.get('rejected_pairs_by_reason', {})}"
+                )
+                for item in merge_diagnostics.get("accepted_connections", []):
+                    details.append(
+                        f"  PASS {item['from_group']} {item['from_endpoint']} ↔ "
+                        f"{item['to_group']} {item['to_endpoint']}: "
+                        f"거리 {item['distance_px']:.1f}px · "
+                        f"기울기 {item['angle_difference_deg']:.1f}° · "
+                        f"선상 {item['perpendicular_px']:.1f}px → "
+                        f"{item.get('final_group', '?')}"
+                    )
+                rejected = sorted(
+                    (item for item in merge_diagnostics.get("pair_comparisons", [])
+                     if item.get("status") == "FAIL"),
+                    key=lambda item: item.get("distance_px", float("inf")),
+                )
+                for item in rejected[:15]:
+                    details.append(
+                        f"  FAIL {item['from_group']} {item['from_endpoint']} ↔ "
+                        f"{item['to_group']} {item['to_endpoint']}: "
+                        f"거리 {item['distance_px']:.1f}px · "
+                        f"기울기 {item['angle_difference_deg']:.1f}° · "
+                        f"선상 {item['perpendicular_px']:.1f}px · "
+                        f"사유 {item['reason']}"
+                    )
+                if len(rejected) > 15:
+                    details.append(
+                        f"※ 제외된 쌍 중 가까운 15개만 표시. "
+                        f"전체 {len(rejected)}개는 individual_analysis JSON의 "
+                        "checks.center_line.second_pass_diagnostics.pair_comparisons 참고"
+                    )
             for first_group in center_line.get('first_pass_line_groups', []):
                 details.append(
                     f"  1차 {first_group['group_id']}: "

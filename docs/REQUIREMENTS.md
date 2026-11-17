@@ -357,3 +357,10 @@
 - 2차 현장 보정값은 `analysis.center_line_grouping` 아래 `angle_tolerance_deg`(기본 8°, 허용 0~30°), `perpendicular_tolerance_px`(기본 5px, 허용 0~30px), `max_gap_px`(기본 12px, 허용 0~120px)이다.
 - 상단 톱니바퀴 설정에서 변경·저장한 값은 다음 **개별 촬영본 정지선 분석**에서만 적용한다. 결과 `checks.center_line`은 1차 `first_pass_line_groups` / `first_pass_group_count`, 2차 `line_groups` / `second_pass_group_count`, 실제 사용 조건 `grouping_rules.first_pass/second_pass` 및 원본 Y 번호 연계를 남긴다. 기존 PNG, 다른 검출기 기준, Polygon/Link ID는 변경하지 않는다.
 - 설정을 넓히면 인접한 물리적 중앙선이 잘못 합쳐질 수 있다. 최종 C 후보 수를 실제 중앙선 수로 확정하지 않고 사용자 검수를 유지한다. Windows 현장 검증과 테스트는 별도 요청 전 수행하지 않는다.
+
+### 2026-11-17 2차 끝점 연결 병합 및 CG 쌍별 PASS/FAIL 진단 (현행)
+
+- 1차는 기존 Y→CG 그룹(기울기 8°, 같은 선상 거리 5px, 간격 12px)으로 고정하고 2차만 설정값을 적용한다. 2차는 CG 대표선의 끝점-시작점 XY 직선거리와 선 진행 방향·기울기·연장선 수직 편차를 확인하여 근접한 CG를 순차·연쇄 병합한다. 겹치는 평행선과 동일 끝점의 중복 연결은 막는다.
+- `analysis.center_line_grouping`: `angle_tolerance_deg` 기본 8°/최대 30°, `perpendicular_tolerance_px` 기본 5px/최대 30px, `max_gap_px` 기본 20px/최대 300px이다. `max_gap_px` 키는 유지하나 **2차 끝점 거리**를 의미한다. 기존 사용자가 저장한 값은 유지한다.
+- 개별 재분석 결과 `checks.center_line.second_pass_diagnostics.pair_comparisons`에 **모든 CG 쌍**의 양 그룹 원본 끝점, 실제 비교 끝점, 측정/허용 수치, PASS/FAIL, 실패 조건과 최종 그룹을 보관한다. 작업 로그는 성공 연결 전부 및 가까운 실패 20건·사유별 집계를 제공한다. `PASS/FAIL`은 연결 적합성 진단이지 실제 중앙선 존재/승인 판정이 아니다.
+- 1차 결과·원본 PNG·정지선 S/G·흰선 W·Polygon/Link 선택 ID를 임의 수정하지 않는다. 테스트와 Windows 현장 검증은 요청받지 않아 수행하지 않았다.

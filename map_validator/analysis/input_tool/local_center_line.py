@@ -9,7 +9,8 @@ import cv2
 import numpy as np
 
 from ..findings import unknown
-from ..line_grouping import group_line_segments, normalize_center_line_grouping
+from ..line_grouping import group_line_segments
+from ..center_line_endpoint_merge import merge_centerline_endpoints
 from .color_config import hsv_mask
 
 
@@ -91,33 +92,22 @@ def _detect_axis_line_candidates(
         "max_gap_px": 12.0,
     }
     first_pass_groups = group_line_segments(segments, **first_pass_rules)
+    second_pass_diagnostics = None
     if lane:
-        groups = first_pass_groups  # Keep white line behavior unchanged.
+        groups = first_pass_groups  # White lane behavior stays unchanged.
         grouping = first_pass_rules
     else:
-        # 2차: regroup first-pass representative segments with UI settings.
-        grouping = normalize_center_line_grouping(grouping_rules)
+        # 2차: connect first-pass CG start/end points into transitive C groups.
+        # The 1차 geometry and Y fragment members are never changed.
         for idx, group in enumerate(first_pass_groups, 1):
             group["group_id"] = f"CG{idx}"
             a, b = group["endpoints"]
             group["point"] = [round((a[0] + b[0]) / 2, 1),
                               round((a[1] + b[1]) / 2, 1)]
-        first_by_id = {group["group_id"]: group for group in first_pass_groups}
-        representatives = [
-            {"candidate_id": group["group_id"], "endpoints": group["endpoints"]}
-            for group in first_pass_groups
-        ]
-        groups = group_line_segments(representatives, **grouping)
-        for group in groups:
-            first_ids = list(group["member_ids"])
-            source_ids = [
-                original_id for first_id in first_ids
-                for original_id in first_by_id[first_id]["member_ids"]
-            ]
-            group["first_pass_group_ids"] = first_ids
-            group["first_pass_group_count"] = len(first_ids)
-            group["member_ids"] = source_ids
-            group["member_count"] = len(source_ids)
+        groups, second_pass_diagnostics = merge_centerline_endpoints(
+            first_pass_groups, grouping_rules,
+        )
+        grouping = second_pass_diagnostics["second_pass_settings"]
     for idx, group in enumerate(groups, 1):
         group["group_id"] = f"{'L' if lane else 'C'}{idx}"
         a, b = group["endpoints"]
@@ -165,7 +155,7 @@ def _detect_axis_line_candidates(
         "value": None,
         "confidence": None,
         "method": ("local_white_axis_lines_grouped_points_v1" if lane else
-                   "local_yellow_axis_lines_grouped_points_v2_two_pass"),
+                   "local_yellow_axis_lines_grouped_points_v3_endpoint_graph"),
         "reason": (f"{marking} 수평/수직 선 그룹의 중간점을 표시했습니다. "
                    "실제 차선/중앙선 여부와 개수는 사람 검수가 필요합니다."
                    if groups else
@@ -184,13 +174,15 @@ def _detect_axis_line_candidates(
         "first_pass_group_count": len(first_pass_groups),
         "first_pass_line_groups": first_pass_groups if not lane else [],
         "second_pass_group_count": len(groups),
+        "second_pass_diagnostics": second_pass_diagnostics,
         "grouping_rules": {
             "angle_tolerance_deg": grouping["angle_tolerance_deg"],
             "perpendicular_tolerance_px": grouping["perpendicular_tolerance_px"],
-            "max_axial_gap_px": grouping["max_gap_px"],
+            "max_axial_gap_px": first_pass_rules["max_gap_px"],
+            "max_endpoint_distance_px": grouping["max_gap_px"] if not lane else None,
             "axis_tolerance_deg": 18.0,
             "strategy": (
-                "fixed_first_pass_then_configured_second_pass"
+                "fixed_first_pass_then_endpoint_graph_transitive"
                 if not lane else "single_pass"
             ),
             "first_pass": first_pass_rules if not lane else None,

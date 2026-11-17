@@ -361,3 +361,12 @@ AI와 Windows 제어 로직은 UI 스레드를 막지 않도록 분리합니다.
 - **2차(설정값 적용):** 1차 `CG#` 그룹의 대표 선분끼리 다시 기울기·수직거리·연결 간격을 비교하고 병합해 최종 `C#`를 만든다. 기울기 0~30°(기본 8°), 거리 0~30px(기본 5px), 연결 0~120px(기본 12px)를 조정할 수 있다. 2차에서는 1차 그룹을 분할할 수 없다.
 - 저장하면 로컬 `config.yaml`의 `analysis.center_line_grouping`에 기록된다. 저장만으로 기존 근거 이미지가 자동 갱신되지는 않으며 **정지선 분석을 다시 눌러야** 새 2차 값이 적용된다. 원본 PNG는 유지한다.
 - JSON `checks.center_line`에 `first_pass_line_groups`, `first_pass_group_count`, `second_pass_group_count`, 최종 `line_groups` 및 `grouping_rules.first_pass/second_pass`를 남긴다. 상세 화면은 1차→2차 후보 수와 구성 관계를 보여준다. 정지선 S/G 및 흰선 W에는 영향이 없다. 중앙선 여부·개수는 사람이 최종 검수한다.
+
+### 2026-11-17 2차 끝점 연결·반복 병합 및 상세 비교 로그 (현행)
+
+- **1차 Y→CG 분석은 8°/5px/12px 고정**으로 유지한다. 2차 CG→C는 기울기 차이, 연장선 수직 편차, 두 CG의 시작·종료 끝점 XY 직선거리를 기준으로 연결 가능한 끝점 쌍을 탐색한다. 크게 중첩된 평행선은 제외하며 동일 끝점을 중복 사용하지 않는다.
+- 연결 가능한 CG 쌍을 가까운 순으로 연결하고 Union-Find로 연쇄 병합한다. 1차 그룹 및 원본 Y 조각은 유지한다.
+- 기존 `analysis.center_line_grouping.max_gap_px` 설정 키는 호환 유지하되 2차에서 **끝점 연결 거리(px)**로 해석한다. 기본 20px, 최대 300px이며 저장된 이전 값(예: 120px)은 초기화하지 않는다. 기울기 기본 8°(최대 30°), 수직거리 기본 5px(최대 30px) 유지.
+- 분석 결과 `checks.center_line.second_pass_diagnostics.pair_comparisons`에는 **비교한 모든 CG 쌍의 좌표, 끝점 직선거리, 기울기 차이, 수직거리, 각 허용값, PASS/FAIL, 제외 사유, 최종 C 그룹**을 남긴다. `accepted_connections`, `rejected_pairs_by_reason` 등 요약도 기록한다.
+- 작업 로그에는 전체 집계, 모든 PASS 및 **가장 가까운 FAIL 20쌍**을 기록하고, UI 결과 상세에는 PASS 및 가까운 FAIL 15쌍을 표시한다. 전체 비교는 분석 JSON에서 확인한다. '정지선 분석'을 다시 실행해야 새 설정을 반영한다.
+- 정지선 S/G 및 흰색 W 후보 로직은 변경하지 않는다. JSON PASS/FAIL은 **선 조각의 연결 적합성**만 뜻하며 도로 검수 승인 판정이 아니다. Windows 현장 이미지 분석과 자동 테스트는 요청받지 않아 미실행이다.

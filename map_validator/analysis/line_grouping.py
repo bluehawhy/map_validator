@@ -9,12 +9,12 @@ from __future__ import annotations
 from math import atan2, cos, degrees, hypot, isfinite, pi, sin
 from typing import Sequence
 
-# Defaults are local image-pixel tolerances for yellow centre-line *candidate*
-# grouping. They are independent from stop-line and white-lane thresholds.
+# Editable SECOND-pass endpoint rules; fixed first-pass and other markings unchanged.
+# Existing max_gap_px YAML key means endpoint XY distance in the second pass.
 CENTER_LINE_GROUPING_LIMITS = {
     "angle_tolerance_deg": (0.0, 30.0, 8.0),
     "perpendicular_tolerance_px": (0.0, 30.0, 5.0),
-    "max_gap_px": (0.0, 120.0, 12.0),
+    "max_gap_px": (0.0, 300.0, 20.0),
 }
 
 

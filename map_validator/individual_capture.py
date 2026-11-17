@@ -267,14 +267,49 @@ def capture_and_analyze(
     paint_stop_line_roi_border(overlay,stop_line)
     paint_guidance_roi_border(overlay,guide_lines)
     paint_approach_roi_border(overlay,approach_paths)
+    second = center_line.get("second_pass_diagnostics") or {}
     APP_LOG.info(
-        "[개별촬영][중앙선] 노란조각=%s 1차그룹=%s 2차그룹=%s ROI=%s 2차설정=%s",
+        "[개별촬영][중앙선2차] 조각=%s 1차CG=%s 2차C=%s 쌍=%s 적합=%s 병합=%s "
+        "설정=%s 실패사유집계=%s",
         center_line.get("total_segments", 0),
         center_line.get("first_pass_group_count", 0),
         center_line.get("second_pass_group_count", 0),
-        center_line.get("roi"),
-        center_line.get("grouping_rules", {}).get("second_pass"),
+        second.get("candidate_pairs", 0),
+        second.get("eligible_pairs", 0),
+        second.get("accepted_connection_count", 0),
+        second.get("second_pass_settings"),
+        second.get("rejected_pairs_by_reason", {}),
     )
+    for item in second.get("accepted_connections", []):
+        APP_LOG.info(
+            "[개별촬영][중앙선2차][PASS] %s %s ↔ %s %s "
+            "끝점=%.2fpx 기울기=%.2f도 선상=%.2fpx → %s",
+            item["from_group"], item["from_endpoint"],
+            item["to_group"], item["to_endpoint"],
+            item["distance_px"], item["angle_difference_deg"],
+            item["perpendicular_px"], item.get("final_group", "?"),
+        )
+    failures = sorted(
+        (item for item in second.get("pair_comparisons", [])
+         if item.get("status") == "FAIL"),
+        key=lambda item: item.get("distance_px", float("inf")),
+    )
+    for item in failures[:20]:
+        APP_LOG.info(
+            "[개별촬영][중앙선2차][FAIL] %s %s ↔ %s %s "
+            "끝점=%.2fpx 기울기=%.2f도 선상=%.2fpx 사유=%s",
+            item["from_group"], item["from_endpoint"],
+            item["to_group"], item["to_endpoint"],
+            item["distance_px"], item["angle_difference_deg"],
+            item["perpendicular_px"], item["reason"],
+        )
+    if len(failures) > 20:
+        APP_LOG.info(
+            "[개별촬영][중앙선2차] FAIL 로그 %s/%s개 표시, 전체 비교 좌표·사유는 "
+            "individual_analysis JSON의 checks.center_line."
+            "second_pass_diagnostics.pair_comparisons 확인",
+            20, len(failures),
+        )
     APP_LOG.info(
         "[개별촬영][유도선/경로] U=%s P=%s",
         guide_lines.get("group_count",0),approach_paths.get("group_count",0),
