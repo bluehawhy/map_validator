@@ -16,6 +16,7 @@ from .color_config import hsv_mask
 def local_white_marking_candidates(
     image: np.ndarray, point: list[float] | None, overlay: np.ndarray,
     *, roi: list[int] | None, exclude_mask: np.ndarray | None = None,
+    excluded_objects: list[str] | None = None,
 ) -> dict:
     if point is None or roi is None:
         return {
@@ -114,7 +115,10 @@ def local_white_marking_candidates(
         "line_groups": [],
         "group_count": 0,
         "grouping_complete": False,
-        "excluded_objects": (["road_arrow_white_pixels"] if exclude_mask is not None else []),
+        "excluded_objects": (
+            list(excluded_objects) if excluded_objects is not None
+            else (["unspecified_white_mask"] if exclude_mask is not None else [])
+        ),
         "excluded_white_pixels": excluded_pixels,
         "palette_source": "color_ranges.json",
         "detection_rules": {
@@ -127,7 +131,9 @@ def local_white_marking_candidates(
             "angle_restriction": None,
             "coverage_filter": None,
             "classification": "deferred",
-            "pixel_exclusion": ("road_arrow_white_pixels" if exclude_mask is not None
-                                else "none"),
+            "pixel_exclusion": (
+                list(excluded_objects) if excluded_objects is not None
+                else (["unspecified_white_mask"] if exclude_mask is not None else [])
+            ),
         },
     }

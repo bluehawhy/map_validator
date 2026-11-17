@@ -17,6 +17,9 @@ import numpy as np
 from .analysis.input_tool.local_stop_line import local_stop_line_candidates
 from .analysis.input_tool.local_center_line import local_center_line_candidates
 from .analysis.input_tool.local_white_marking import local_white_marking_candidates
+from .analysis.input_tool.local_ui_text import (
+    fixed_ui_text_exclusion, paint_ui_text_exclusion,
+)
 from .analysis.input_tool.local_road_arrow import (
     local_road_arrow_candidates, paint_arrow_candidates,
 )
@@ -232,19 +235,39 @@ def capture_and_analyze(
     raw_white = local_white_marking_candidates(
         input_tool_image, point, np.zeros_like(overlay), roi=stop_line.get("roi"),
     )
+    ui_text, text_white_exclusion = fixed_ui_text_exclusion(
+        input_tool_image, marker.get("canvas_bounds"),
+        roi=stop_line.get("roi"),
+    )
+    after_ui = local_white_marking_candidates(
+        input_tool_image, point, np.zeros_like(overlay), roi=stop_line.get("roi"),
+        exclude_mask=text_white_exclusion,
+        excluded_objects=["fixed_ui_status_text"],
+    )
     road_arrows, arrow_white_exclusion = local_road_arrow_candidates(
         input_tool_image, point, roi=stop_line.get("roi"),
     )
+    combined_exclusion = cv2.bitwise_or(
+        text_white_exclusion, arrow_white_exclusion,
+    )
+    paint_ui_text_exclusion(overlay, ui_text)
     white_markings = local_white_marking_candidates(
         input_tool_image, point, overlay, roi=stop_line.get("roi"),
-        exclude_mask=arrow_white_exclusion,
+        exclude_mask=combined_exclusion,
+        excluded_objects=["fixed_ui_status_text", "road_arrow_white_pixels"],
     )
     paint_arrow_candidates(overlay, road_arrows)
     APP_LOG.info(
-        "[개별촬영][화살표] A후보=%s 흰색제외픽셀=%s 원시W=%s 제외후W=%s",
+        "[개별촬영][UI문자] 제외영역=%s 흰색제외픽셀=%s 원본W=%s 문자제외후W=%s",
+        [r.get("bbox") for r in ui_text.get("regions", [])],
+        ui_text.get("excluded_white_pixels", 0),
+        raw_white.get("total_segments", 0), after_ui.get("total_segments", 0),
+    )
+    APP_LOG.info(
+        "[개별촬영][화살표] A후보=%s 흰색제외픽셀=%s 문자제외후W=%s 최종W=%s",
         road_arrows.get("candidate_count", 0),
         road_arrows.get("excluded_white_pixels", 0),
-        raw_white.get("total_segments", 0),
+        after_ui.get("total_segments", 0),
         white_markings.get("total_segments", 0),
     )
     APP_LOG.info(
@@ -330,8 +353,9 @@ def capture_and_analyze(
             "road_id": None, "angle_deg": None, "heading_deg": None,
         },
         "checks": {"stop_line": stop_line, "center_line": center_line,
-                   "road_arrows": road_arrows,
+                   "ui_text_exclusion": ui_text, "road_arrows": road_arrows,
                    "white_marking_candidates_raw": raw_white,
+                   "white_marking_candidates_after_ui": after_ui,
                    "white_marking_candidates": white_markings},
         "human_review": "requires_human_review",
         "warning": (

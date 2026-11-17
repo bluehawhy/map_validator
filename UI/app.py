@@ -985,6 +985,8 @@ class MainWindow(QMainWindow):
             arrow_candidates = result.get("checks", {}).get("road_arrows", {})
             arrow_items = arrow_candidates.get("candidates", [])
             original_white = result.get("checks", {}).get("white_marking_candidates_raw")
+            after_ui_white = result.get("checks", {}).get("white_marking_candidates_after_ui")
+            ui_text = result.get("checks", {}).get("ui_text_exclusion", {})
             white_raw = result.get("checks", {}).get("white_marking_candidates")
             lane_line = result.get("checks", {}).get("lane_line", {})
             lane_points = lane_line.get("line_groups", [])
@@ -1098,11 +1100,17 @@ class MainWindow(QMainWindow):
                         f"{item['green_edge_pixels']}px / 흰색 {item['white_pixels']}px"
                     )
             if white_raw is not None:
-                details.append("── 흰색 선 조각 W (화살표 후보 제외 후 · 미분류) ──")
+                details.append("── 흰색 선 조각 W (UI 문자·화살표 제외 후 · 미분류) ──")
                 if original_white is not None:
                     details.append(
-                        f"제외 전 원시 흰색 조각: {original_white.get('total_segments', 0)}개 · "
-                        f"제외 후: {white_raw.get('total_segments', 0)}개"
+                        f"원본 W {original_white.get('total_segments', 0)}개 → "
+                        f"문자 제외 후 W {after_ui_white.get('total_segments', '미확인') if after_ui_white else '미확인'}개 → "
+                        f"화살표 제외 후 W {white_raw.get('total_segments', 0)}개"
+                    )
+                if ui_text:
+                    details.append(
+                        f"상단 UI 문자 흰색 제외: {ui_text.get('excluded_white_pixels', 0)}px · "
+                        f"영역 {ui_text.get('regions', [])}"
                     )
                 details.append(f"흰색 검출: {white_raw.get('reason', '판단 보류')}")
                 details.append(
