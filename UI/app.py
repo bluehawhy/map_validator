@@ -984,6 +984,8 @@ class MainWindow(QMainWindow):
             center_points = center_line.get("line_groups", [])
             guide = result.get("checks", {}).get("guidance_lines", {})
             guide_groups = guide.get("groups", [])
+            paths = result.get("checks", {}).get("approach_paths", {})
+            path_groups = paths.get("groups", [])
             arrow_candidates = result.get("checks", {}).get("road_arrows", {})
             arrow_items = arrow_candidates.get("candidates", [])
             original_white = result.get("checks", {}).get("white_marking_candidates_raw")
@@ -1020,7 +1022,8 @@ class MainWindow(QMainWindow):
             self.individual_status.setText(
                 f"개별 촬영 {result['revision']}회 · {marker_text} · "
                 f"{grouping_label} · 중앙선 포인트 {len(center_points)}개 "
-                f"· 유도선 U {len(guide_groups)}개 · {white_status} · 사람 검수 필요"
+                f"· 유도선 U {len(guide_groups)}개 · 진입 경로 P {len(path_groups)}개 "
+                f"· {white_status} · 사람 검수 필요"
             )
             details = [
                 (
@@ -1090,7 +1093,14 @@ class MainWindow(QMainWindow):
                 details.append(
                     f"※ 중앙선 포인트 {center_line['omitted_points']}개는 표시 상한으로 생략됨"
                 )
-            details.append("── 유도선 색상 연결 그룹 (U · 검수 필요) ──")
+            details.append("── 검수 범위별 후보 · 근거 이미지 테두리 ──")
+            for kind, spec in result.get("review_regions", {}).items():
+                details.append(
+                    f"  {kind}: 후보 {spec.get('candidate_count', 0)}개 · "
+                    f"ROI {spec.get('roi')} · {spec.get('border')}"
+                )
+            details.append("※ 교차로 외곽 RGB(0,0,255)는 검출 후보에서 제외하며 원본 유지")
+            details.append("── 유도선 파랑 RGB(0,128,255) 연결 그룹 (U) ──")
             details.append(
                 f"유도선: {guide.get('reason', '과거 기록 또는 분석 보류')}"
             )
@@ -1110,6 +1120,17 @@ class MainWindow(QMainWindow):
                     f"외곽 {group['bbox']} · 연결 영역 "
                     f"{group['connected_pixels']}px · 실제 색상 픽셀 "
                     f"{group['original_color_pixels']}px"
+                )
+            details.append("── 진입 전 경로선 RGB(121,171,255) 연결 그룹 (P) ──")
+            details.append(
+                f"PATH ROI: {paths.get('roi', '미확인')} · "
+                f"후보 {paths.get('group_count', 0)}개 · "
+                f"{paths.get('reason', '판단 보류')}"
+            )
+            for group in path_groups:
+                details.append(
+                    f"  {group['candidate_id']}: 대표점 {group['point']}px · "
+                    f"외곽 {group['bbox']} · 연결 픽셀 {group['connected_pixels']}"
                 )
             if road_arrows := (arrow_candidates if arrow_candidates else None):
                 details.append("── 노면화살표 검출 후보 (A · 검수 필요) ──")
@@ -1209,7 +1230,7 @@ class MainWindow(QMainWindow):
                 "※ 선 후보는 정지선 확정이 아닙니다. 횡단보도/도로 경계를 구별하세요.",
                 "※ A는 회색/초록/흰색으로 검출한 화살표 후보이며, 제외 전 W는 JSON에 보존합니다. 최종 판정은 수동입니다.",
                 "※ 노란 선/포인트는 중앙선 검수용 후보이며 실제 중앙선 2개·4개를 확정하지 않습니다.",
-                "※ U#는 같은 색상으로 연결된 그림의 집합이며 실제 유도선 개수나 경로를 확정하지 않습니다.",
+                "※ U#/P#는 지정 RGB의 연결 집합 후보입니다. 실제 유도선·진입 경로로 확정하지 않습니다.",
                 f"원본: {result['input_tool_image']}",
                 f"근거: {result['input_tool_overlay']}",
                 f"후보 미리보기: {result.get('input_tool_focus', '없음')}",

@@ -20,6 +20,7 @@ from .analysis.input_tool.local_stop_line import (
 from .analysis.input_tool.local_center_line import local_center_line_candidates
 from .analysis.input_tool.local_guidance_line import (
     local_guidance_line_candidates, paint_guidance_roi_border,
+    local_approach_path_candidates, paint_approach_roi_border,
 )
 from .analysis.input_tool.local_white_marking import local_white_marking_candidates
 from .analysis.input_tool.local_ui_text import (
@@ -274,16 +275,26 @@ def capture_and_analyze(
     guide_lines = local_guidance_line_candidates(
         input_tool_image, point, overlay, stop_roi=stop_line.get("roi"),
     )
+    approach_paths = local_approach_path_candidates(
+        input_tool_image, point, overlay, stop_roi=stop_line.get("roi"),
+    )
     APP_LOG.info(
         "[개별촬영][유도선] 연결그룹 U=%s 색상별=%s ROI=%s",
         guide_lines.get("group_count", 0),
         guide_lines.get("color_counts", {}),
         guide_lines.get("roi"),
     )
-    # Final overlay pass: the two measured ROI outlines stay visible
-    # above every S/G, C, A, W and U candidate annotation.
+    APP_LOG.info(
+        "[개별촬영][진입경로] P후보=%s RGB=%s ROI=%s",
+        approach_paths.get("group_count", 0),
+        approach_paths.get("color_rgb"),
+        approach_paths.get("roi"),
+    )
+    # Show each reviewed region after all candidate overlays. C/A/W share
+    # STOP ROI; U and P have distinct vehicle-relative search rectangles.
     paint_stop_line_roi_border(overlay, stop_line)
     paint_guidance_roi_border(overlay, guide_lines)
+    paint_approach_roi_border(overlay, approach_paths)
     APP_LOG.info(
         "[개별촬영][UI문자] 제외영역=%s 흰색제외픽셀=%s 원본W=%s 문자제외후W=%s",
         [r.get("bbox") for r in ui_text.get("regions", [])],
@@ -383,14 +394,48 @@ def capture_and_analyze(
         },
         "checks": {"stop_line": stop_line, "center_line": center_line,
                    "guidance_lines": guide_lines,
+                   "approach_paths": approach_paths,
                    "ui_text_exclusion": ui_text, "road_arrows": road_arrows,
                    "white_marking_candidates_raw": raw_white,
                    "white_marking_candidates_after_ui": after_ui,
                    "white_marking_candidates": white_markings},
+        "review_regions": {
+            "stop_line_S_G": {
+                "roi": stop_line.get("roi"),
+                "candidate_count": len(stop_line.get("line_candidates", [])),
+                "group_count": len(stop_line.get("line_groups", [])),
+                "border": "STOP ROI (orange)",
+            },
+            "center_line_C": {
+                "roi": center_line.get("roi"),
+                "candidate_count": len(center_line.get("line_groups", [])),
+                "border": "STOP ROI (shared)",
+            },
+            "road_arrow_A": {
+                "roi": road_arrows.get("roi"),
+                "candidate_count": len(road_arrows.get("candidates", [])),
+                "border": "STOP ROI (shared)",
+            },
+            "white_W": {
+                "roi": white_markings.get("roi"),
+                "candidate_count": len(white_markings.get("line_candidates", [])),
+                "border": "STOP ROI (shared)",
+            },
+            "guidance_U": {
+                "roi": guide_lines.get("roi"),
+                "candidate_count": guide_lines.get("group_count", 0),
+                "border": "GUIDE ROI (magenta)",
+            },
+            "approach_path_P": {
+                "roi": approach_paths.get("roi"),
+                "candidate_count": approach_paths.get("group_count", 0),
+                "border": "PATH ROI (blue-green)",
+            },
+        },
         "human_review": "requires_human_review",
         "warning": (
             "빨간 표시는 현재 사용자 위치의 화면 좌표 후보입니다. 실제 지도 좌표·진행 방향은 "
-            "추정하지 않습니다. 정지선·중앙선·유도선 U·노면화살표 A 및 흰색 W 후보는 사람 검수가 필요합니다."
+            "추정하지 않습니다. 정지선 S/G·중앙선 C·유도선 U·진입 경로 P·노면화살표 A·흰선 W 후보는 사람 검수가 필요합니다."
         ),
     }
     history_path = folder / f"individual_analysis_r{revision:03d}.json"

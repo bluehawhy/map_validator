@@ -11,6 +11,7 @@ import numpy as np
 from ..findings import unknown
 from ..line_grouping import group_line_segments
 from .local_ui_text import detect_hdl_view_text_bottom
+from .blue_palette import blue_color_mask
 
 
 def local_stop_line_candidates(
@@ -58,8 +59,9 @@ def local_stop_line_candidates(
         }
     roi = image[y0:y1, x0:x1]
 
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    cyan = cv2.inRange(hsv, (78, 105, 120), (102, 255, 255))
+    # RGB(0,255,255) is the dedicated stop-line colour; reject the other
+    # three blue classes, including pure blue intersection outlines.
+    cyan = blue_color_mask(roi, "stop_line")
     cyan = cv2.morphologyEx(cyan, cv2.MORPH_CLOSE, np.ones((2, 2), np.uint8))
     # Keep the old per-image line sensitivity. Scaling the minimum line
     # length with the wider ROI would silently discard shorter stop lines.
@@ -84,7 +86,14 @@ def local_stop_line_candidates(
     # S# denotes raw Hough fragments; G# denotes geometrically aligned groups.
     for index, line in enumerate(lines, 1):
         line["candidate_id"] = f"S{index}"
+        first, last = line["endpoints"]
+        line["point"] = [round((first[0] + last[0]) / 2, 1),
+                         round((first[1] + last[1]) / 2, 1)]
     groups = group_line_segments(lines)
+    for group in groups:
+        first, last = group["endpoints"]
+        group["point"] = [round((first[0] + last[0]) / 2, 1),
+                          round((first[1] + last[1]) / 2, 1)]
     member_groups = {
         member_id: group["group_id"]
         for group in groups for member_id in group["member_ids"]
@@ -161,6 +170,8 @@ def local_stop_line_candidates(
         "reason": ("빨간 기준점 주변의 시안색 선 후보입니다. 정지선/도로 경계의 구별은 수동 검증이 필요합니다."
                    if lines else "빨간 기준점 주변에서 시안색 선 후보를 찾지 못했습니다. 정지선 없음으로 확정하지 않습니다."),
         "roi": [x0, y0, x1, y1],
+        "palette_source": "color_ranges.json.blue_markings.colors.stop_line",
+        "color_rgb": [0, 255, 255],
         "roi_rules": {
             "radius_x_fraction": .31,
             "radius_below_fraction": .44,

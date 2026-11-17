@@ -114,39 +114,53 @@
     "max_row_separation_px": 135,
     "note": "도면 왼쪽 위의 Z/Zoom/Dist 행과 HDL View/Input 행을 문자형 흰색 컴포넌트 그룹으로 찾는다. 두 번째 행의 하단 + 10px를 분석 시작점으로 사용. 문자 두 행을 신뢰성 있게 찾지 못하면 ROI를 추측하지 않고 선형 분석 보류."
   },
-  "guide_lines": {
-    "color_space": "rgb",
+  "blue_markings": {
+    "coordinate_space": "RGB",
+    "description": "교차로의 파란색 계열 4종을 RGB 정확값으로 독립 분류. 교차로 외곽선은 검출 마스크에서 제외하되 원본 보존.",
+    "tolerance_per_channel": 0,
     "colors": {
-      "green": {
-        "rgb": [
-          0,
-          128,
-          0
-        ],
-        "label": "초록 유도선"
-      },
-      "orange": {
-        "rgb": [
-          255,
-          128,
-          0
-        ],
-        "label": "주황 유도선"
-      },
-      "blue": {
+      "intersection_outline": {
         "rgb": [
           0,
           0,
           255
         ],
-        "label": "진파랑 유도선"
+        "role": "exclude",
+        "label": "교차로 외곽선"
+      },
+      "guidance": {
+        "rgb": [
+          0,
+          128,
+          255
+        ],
+        "role": "U",
+        "label": "유도선"
+      },
+      "stop_line": {
+        "rgb": [
+          0,
+          255,
+          255
+        ],
+        "role": "S/G",
+        "label": "정지선 후보"
+      },
+      "approach_path": {
+        "rgb": [
+          121,
+          171,
+          255
+        ],
+        "role": "P",
+        "label": "교차로 진입 전 경로선"
       }
     },
-    "channel_tolerance": 24,
-    "morph_close_kernel_px": 3,
-    "min_connected_pixels": 30,
-    "min_group_span_px": 25,
-    "roi": {
+    "connectivity": 8,
+    "closing_kernel_px": 3,
+    "min_connected_pixels": 18,
+    "min_group_span_px": 18,
+    "guidance_roi": {
       "half_width_fraction": 0.34,
       "above_position_fraction": 0.34,
       "below_position_fraction": 0.24,
@@ -155,6 +169,15 @@
       "min_below_px": 35,
       "top_inset_from_stop_roi_px": 6
     },
-    "note": "색상은 첨부 HD_3D Tool 사진의 대표 RGB를 기준으로 고정. 파랑 RGB(0,0,255)와 시안 RGB(0,128,255)는 별도 색상. 연결된 동일 색상 픽셀은 U# 후보 그룹이며 실제 유도선 확정이 아니다."
+    "approach_roi": {
+      "half_width_fraction": 0.3,
+      "above_position_fraction": 0.2,
+      "below_position_fraction": 0.44,
+      "min_half_width_px": 55,
+      "min_above_px": 40,
+      "min_below_px": 55,
+      "top_inset_from_stop_roi_px": 6
+    },
+    "notes": "유도선 RGB(0,128,255)와 진파랑 RGB(0,0,255)을 혼동하지 않는다. 색이 정확히 일치한 픽셀만 1차 검출. 글자/안티앨리어싱으로 인한 추가 색은 현장 검수 뒤 별도 보정."
   }
 }
