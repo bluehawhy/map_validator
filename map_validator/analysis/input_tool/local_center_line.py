@@ -84,7 +84,7 @@ def _detect_axis_line_candidates(
     groups = group_line_segments(
         segments,
         angle_tolerance_deg=8.0,
-        perpendicular_tolerance_px=2.5,
+        perpendicular_tolerance_px=5.0,
         max_gap_px=12.0,
     )
     for idx, group in enumerate(groups, 1):
@@ -145,7 +145,7 @@ def _detect_axis_line_candidates(
         "grouping_complete": total_segments == len(segments),
         "grouping_rules": {
             "angle_tolerance_deg": 8.0,
-            "perpendicular_tolerance_px": 2.5,
+            "perpendicular_tolerance_px": 5.0,
             "max_axial_gap_px": 12.0,
             "axis_tolerance_deg": 18.0,
         },
