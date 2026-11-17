@@ -20,11 +20,12 @@ def local_stop_line_candidates(
 
     height, width = image.shape[:2]
     cx, cy = point
-    # Wide, asymmetric map viewport selection: approximate the inspector's
-    # marked region around the current-position marker. More road is visible
-    # below/above the marker than in the earlier small symmetric box.
+    # Field-tuned ROI: keep the upper edge below the red transverse line in
+    # the reference view, avoiding the fixed Zoom/Dist/HDL View text overlays.
+    # The inspector frames shots manually; this is *not* red-line tracking.
+    # All S/G, C, A and W candidates share this narrower ROI.
     radius_x = max(55, round(width * .31))
-    radius_above = max(55, round(height * .35))
+    radius_above = max(55, round(height * .16))
     radius_below = max(55, round(height * .44))
     # Ignore the HD_3D Tool toolbar (top) and status strip (bottom).
     map_top = round(height * .14)
@@ -141,6 +142,16 @@ def local_stop_line_candidates(
         "reason": ("빨간 기준점 주변의 시안색 선 후보입니다. 정지선/도로 경계의 구별은 수동 검증이 필요합니다."
                    if lines else "빨간 기준점 주변에서 시안색 선 후보를 찾지 못했습니다. 정지선 없음으로 확정하지 않습니다."),
         "roi": [x0, y0, x1, y1],
+        "roi_rules": {
+            "radius_x_fraction": .31,
+            "radius_above_fraction": .16,
+            "radius_below_fraction": .44,
+            "minimum_radius_px": 55,
+            "map_top_fraction": .14,
+            "map_bottom_fraction": .976,
+            "red_line_detection": False,
+            "positioning": "manual_capture_reference",
+        },
         "total_segments": total_segments,
         "shown_segments": len(lines),
         "omitted_segments": max(0, total_segments - len(lines)),
