@@ -182,7 +182,12 @@ class ControlWorker(QThread):
             self._check_stop()
             from map_validator.individual_capture import analyze_individual
 
-            result = analyze_individual(folder, validate_case_id(folder.name), revision)
+            result = analyze_individual(
+                folder, validate_case_id(folder.name), revision,
+                center_line_grouping=self.config.get("analysis", {}).get(
+                    "center_line_grouping"
+                ),
+            )
             self._progress(f"기존 촬영본 r{revision:03d} 분석 결과 갱신 완료")
             self.result_ready.emit(result)
             return
