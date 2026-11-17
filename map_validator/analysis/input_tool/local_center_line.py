@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 
 from ..findings import unknown
-from ..line_grouping import group_line_segments
+from ..line_grouping import group_line_segments, normalize_center_line_grouping
 from .color_config import hsv_mask
 
 
@@ -19,8 +19,11 @@ def local_center_line_candidates(
     overlay: np.ndarray,
     *,
     roi: list[int] | None,
+    grouping_rules: dict | None = None,
 ) -> dict:
-    return _detect_axis_line_candidates(image, point, overlay, roi=roi, lane=False)
+    return _detect_axis_line_candidates(
+        image, point, overlay, roi=roi, lane=False, grouping_rules=grouping_rules,
+    )
 
 
 def _detect_axis_line_candidates(
@@ -30,6 +33,7 @@ def _detect_axis_line_candidates(
     *,
     roi: list[int] | None,
     lane: bool,
+    grouping_rules: dict | None = None,
 ) -> dict:
     marking = "흰색 차선" if lane else "노란 중앙선"
     if point is None or roi is None:
@@ -79,14 +83,14 @@ def _detect_axis_line_candidates(
     for idx, segment in enumerate(segments, 1):
         segment["candidate_id"] = f"{'W' if lane else 'Y'}{idx}"
 
-    # Tighter lateral grouping than the stop-line default: a second or fourth
-    # parallel centre line must remain a separate candidate when resolvable.
-    groups = group_line_segments(
-        segments,
-        angle_tolerance_deg=8.0,
-        perpendicular_tolerance_px=2.5 if lane else 5.0,
-        max_gap_px=12.0,
+    # Different visible parallel lines should not merge on slope alone.
+    # Only yellow centre-line tolerances are adjustable through the UI.
+    grouping = (
+        {"angle_tolerance_deg": 8.0, "perpendicular_tolerance_px": 2.5,
+         "max_gap_px": 12.0}
+        if lane else normalize_center_line_grouping(grouping_rules)
     )
+    groups = group_line_segments(segments, **grouping)
     for idx, group in enumerate(groups, 1):
         group["group_id"] = f"{'L' if lane else 'C'}{idx}"
         a, b = group["endpoints"]
@@ -144,9 +148,9 @@ def _detect_axis_line_candidates(
         "omitted_points": len(groups) - len(shown),
         "grouping_complete": total_segments == len(segments),
         "grouping_rules": {
-            "angle_tolerance_deg": 8.0,
-            "perpendicular_tolerance_px": 2.5 if lane else 5.0,
-            "max_axial_gap_px": 12.0,
+            "angle_tolerance_deg": grouping["angle_tolerance_deg"],
+            "perpendicular_tolerance_px": grouping["perpendicular_tolerance_px"],
+            "max_axial_gap_px": grouping["max_gap_px"],
             "axis_tolerance_deg": 18.0,
         },
     }
