@@ -1,8 +1,9 @@
 """Stored individual WGC capture selector and collapsible review controls."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
+
+from map_validator.individual_capture_index import list_individual_capture_files
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPainter, QPixmap
@@ -129,21 +130,12 @@ class IndividualReviewControls(QWidget):
                 locations.extend(p for p in temporary.iterdir()
                                  if p.is_dir() and not p.is_symlink())
             for folder in locations:
-                manifest_file = folder / "individual_capture.json"
-                if not manifest_file.is_file():
-                    continue
+                # Raw PNGs are authoritative: the manifest may have been
+                # deleted or partially cleared by the inspector.
                 try:
-                    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
-                    if manifest.get("case_id") != folder.name:
-                        continue
-                    for entry in manifest.get("history", []):
-                        revision = int(entry.get("revision", -1))
-                        if revision < 1:
-                            continue
-                        raw = folder / "captures" / "individual" / f"input_tool_r{revision:03d}.png"
-                        if raw.is_file() and not raw.is_symlink():
-                            candidates.append((folder, revision))
-                except (OSError, ValueError, TypeError, KeyError):
+                    for revision in list_individual_capture_files(folder):
+                        candidates.append((folder, revision))
+                except OSError:
                     continue
         candidates.sort(key=lambda item: (item[0].name.casefold(), item[1]), reverse=True)
         self.combo.blockSignals(True)

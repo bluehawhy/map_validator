@@ -163,3 +163,9 @@ output.directory/
 - `analysis/line_grouping.py`: 실선/점선 모두 공통 기울기·동일 선상 그룹화 로직을 재사용한다.
 - `individual_capture.py`: 선택한 원본 재분석 시 `checks.lane_line`과 `checks.dashed_lane_line`를 분리 기록하고 동일 오버레이에 후보 포인트를 그린다.
 - `UI/app.py`: 후보 분석 텍스트에 실선 L 및 점선 D의 그룹·간격·좌표를 표시한다. 원본 PNG 보존과 개별 촬영 목록 정책은 유지한다.
+
+## 2026-11-17 원본 PNG 기준 개별 촬영 이력 복구
+
+- `map_validator/individual_capture_index.py`: 개별 촬영 원본 `input_tool_rNNN.png` 탐색 및 버전 인덱스(표시용 JSON과 독립).
+- `map_validator/individual_capture.py`: manifest의 누락된 버전만 원본 기준으로 복구하며 복구 시간의 출처를 기록. 원본 PNG와 기존 분석 데이터를 삭제하거나 변경하지 않는다.
+- `UI/individual_review_controls.py`: 사진 목록을 manifest가 아닌 인덱스의 실제 원본 PNG 기준으로 작성한다.

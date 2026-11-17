@@ -18,6 +18,7 @@ from .analysis.input_tool.local_stop_line import local_stop_line_candidates
 from .analysis.input_tool.local_center_line import local_center_line_candidates
 from .analysis.input_tool.local_lane_line import local_lane_line_candidates
 from .analysis.input_tool.red_marker import find_red_marker
+from .individual_capture_index import list_individual_capture_files
 from .stage_types import validate_case_id
 
 MANIFEST = "individual_capture.json"
@@ -34,6 +35,55 @@ def _write_json(path: Path, data: dict) -> None:
         temp.unlink(missing_ok=True)
 
 
+def _recover_missing_capture_history(folder: Path, manifest: dict) -> tuple[dict[int, Path], bool]:
+    """Restore missing manifest entries from raw PNG files without changing them.
+
+    Existing history entries/analysis links remain untouched. When the original
+    capture time is absent, file mtime is only an estimated fallback and is
+    explicitly marked as recovered rather than presented as a true shot time.
+    """
+    originals = list_individual_capture_files(folder)
+    history = manifest.setdefault("history", [])
+    if not isinstance(history, list):
+        raise ValueError("개별 촬영 기록의 history 형식이 올바르지 않습니다.")
+
+    recorded: dict[int, dict] = {}
+    for entry in history:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            revision = int(entry.get("revision", -1))
+        except (TypeError, ValueError):
+            continue
+        if revision > 0 and revision not in recorded:
+            recorded[revision] = entry
+
+    changed = False
+    for revision, raw_path in originals.items():
+        entry = recorded.get(revision)
+        if entry is None:
+            entry = {"revision": revision}
+            history.append(entry)
+            recorded[revision] = entry
+            changed = True
+            APP_LOG.warning(
+                "[개별촬영][이력복구] 원본 PNG로 누락 버전 r%03d 복원: %s",
+                revision, raw_path.name,
+            )
+        relative_path = raw_path.relative_to(folder).as_posix()
+        if entry.get("input_tool_image") != relative_path:
+            entry["input_tool_image"] = relative_path
+            changed = True
+        if not entry.get("captured_at_utc"):
+            entry["captured_at_utc"] = datetime.fromtimestamp(
+                raw_path.stat().st_mtime, tz=timezone.utc
+            ).isoformat()
+            entry["captured_at_source"] = "file_mtime_recovered"
+            changed = True
+        # Do not synthesize a completed analysis for a recovered raw capture.
+    return originals, changed
+
+
 def capture_and_analyze(
     folder: Path, case_id: str, input_tool_image: np.ndarray | None,
     *, unassigned: bool = False, capture_only: bool = False,
@@ -48,17 +98,29 @@ def capture_and_analyze(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {
         "schema_version": 1, "case_id": case_id, "history": [],
     }
-    if manifest.get("schema_version") != 1 or manifest.get("case_id") != case_id:
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1 or manifest.get("case_id") != case_id:
         raise ValueError("개별 촬영 기록의 검수 ID 또는 버전이 일치하지 않습니다.")
+
+    original_files, recovered = _recover_missing_capture_history(folder, manifest)
     if existing_revision is None:
-        revision = len(manifest.get("history", [])) + 1
+        recorded_revisions = set()
+        for entry in manifest["history"]:
+            if isinstance(entry, dict):
+                try:
+                    recorded_revisions.add(int(entry.get("revision", -1)))
+                except (TypeError, ValueError):
+                    pass
+        revision = max({0, *original_files.keys(), *recorded_revisions}) + 1
         while (target_dir / f"input_tool_r{revision:03d}.png").exists():
             revision += 1
     else:
         revision = int(existing_revision)
-        if revision < 1 or not any(int(entry.get("revision", -1)) == revision
-                                   for entry in manifest.get("history", [])):
-            raise ValueError("선택한 개별 촬영 버전이 저장 목록에 없습니다.")
+        if revision not in original_files:
+            raise FileNotFoundError(
+                f"선택한 개별 촬영 원본 input_tool_r{revision:03d}.png가 없습니다."
+            )
+        if recovered or not manifest_path.is_file():
+            _write_json(manifest_path, manifest)
 
     raw_path = target_dir / f"input_tool_r{revision:03d}.png"
     overlay_path = target_dir / f"input_tool_r{revision:03d}_overlay.png"
